@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="LabelBox — Compliance checking for packaged commodities under the Legal Metrology (Packaged Commodities) Rules, 2011">
+  <meta name="theme-color" content="#21211F">
+  <title>LabelBox — Label Compliance Scanner</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="LabelBox">
+
+  <!-- Tailwind CSS v3 CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            canvas:       '#F7F6F2',
+            surface:      '#FFFFFF',
+            'surface-muted': '#F1F0EC',
+            ink:          '#21211F',
+            'ink-muted':  '#6E6C66',
+            line:         '#E4E1DA',
+            lime:         '#DCF65A',
+            'lime-soft':  '#F0FAC9',
+            orange:       '#FF7020',
+            'orange-soft':'#FFE3D2',
+            success:      '#268C58',
+            'success-soft':'#DDF5E7',
+            warning:      '#B86B00',
+            'warning-soft':'#FFF0CC',
+            danger:       '#C7473C',
+            'danger-soft': '#FDE2DF',
+            focus:        '#315FCE',
+          },
+          fontFamily: {
+            display: ['"Nunito Sans"', '"Arial Rounded MT Bold"', 'Inter', 'sans-serif'],
+            body:    ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', '"Segoe UI"', 'sans-serif'],
+          },
+          borderRadius: {
+            'sm': '0.75rem',
+            'md': '1.25rem',
+            'lg': '1.75rem',
+            'pill': '999px',
+          },
+          boxShadow: {
+            'card':  '0 10px 28px rgba(33,33,31,0.08)',
+            'float': '0 14px 34px rgba(33,33,31,0.14)',
+          },
+        },
+      },
+    }
+  </script>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+
+<body class="bg-canvas font-body text-ink min-h-screen flex flex-col">
+
+  <!-- ═══ Offline Banner ═══ -->
+  <div id="offline-banner" class="hidden bg-warning text-white text-center text-sm font-semibold py-2 px-4 offline-pulse">
+    <span id="offline-message">📡 Offline — 0 scan(s) queued for sync</span>
+  </div>
+
+  <!-- ═══ Toast Container ═══ -->
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2" style="max-width: 360px;"></div>
+
+  <!-- ═══ Main Content ═══ -->
+  <main class="flex-1 w-full max-w-lg mx-auto px-5 pb-24 pt-6">
+
+    <!-- ──────────────────────────────────────────────────────────────────
+         VIEW: LOGIN
+    ────────────────────────────────────────────────────────────────── -->
+    <section id="view-login" class="view">
+      <!-- Brand -->
+      <div class="text-center mb-8">
+        <div class="text-5xl mb-3">📦</div>
+        <h1 class="font-display text-3xl font-black tracking-tight text-ink">LabelBox</h1>
+        <p class="text-ink-muted text-sm mt-1">Legal Metrology Compliance Scanner</p>
+      </div>
+
+      <!-- Login card -->
+      <div class="bg-surface rounded-2xl border border-line p-6 shadow-card">
+        <h2 class="font-display text-xl font-bold text-ink mb-1">Officer Sign In</h2>
+        <p class="text-sm text-ink-muted mb-5">Use your official <strong>@nic.in</strong> email</p>
+
+        <form id="login-form" class="space-y-4">
+          <div>
+            <label for="login-email" class="block text-sm font-semibold text-ink mb-1.5">Email</label>
+            <input id="login-email" type="email" required placeholder="name@nic.in"
+              class="w-full px-4 py-3 rounded-xl border border-line bg-surface-muted text-ink placeholder-ink-muted/50 focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition">
+          </div>
+          <div>
+            <label for="login-password" class="block text-sm font-semibold text-ink mb-1.5">Password</label>
+            <input id="login-password" type="password" required placeholder="••••••••"
+              class="w-full px-4 py-3 rounded-xl border border-line bg-surface-muted text-ink placeholder-ink-muted/50 focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition">
+          </div>
+
+          <div id="login-error" class="hidden text-sm text-danger bg-danger-soft rounded-xl px-4 py-3 font-medium"></div>
+
+          <button id="login-submit" type="submit"
+            class="w-full bg-ink text-lime font-bold py-3.5 rounded-pill text-base hover:opacity-90 transition">
+            Sign in
+          </button>
+        </form>
+
+        <!-- Demo quick-login -->
+        <div class="mt-5 pt-5 border-t border-line">
+          <p class="text-xs text-ink-muted font-medium mb-3 text-center">Quick Demo Login</p>
+          <div class="grid grid-cols-1 gap-2">
+            <button class="demo-login-btn bg-lime-soft text-ink font-semibold text-sm py-2.5 px-4 rounded-xl hover:bg-lime transition text-left"
+              data-email="rajesh.sharma@nic.in" data-password="officer123">
+              🏷️ Inspector Rajesh Sharma — South Delhi
+            </button>
+            <button class="demo-login-btn bg-lime-soft text-ink font-semibold text-sm py-2.5 px-4 rounded-xl hover:bg-lime transition text-left"
+              data-email="priya.verma@nic.in" data-password="officer123">
+              🏷️ Inspector Priya Verma — Mumbai
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────────────────────────────────────────────────────────────
+         VIEW: SESSION START
+    ────────────────────────────────────────────────────────────────── -->
+    <section id="view-session" class="view">
+      <!-- Officer bar -->
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <div class="text-sm font-bold text-ink" id="officer-name">—</div>
+          <div class="text-xs text-ink-muted" id="officer-email">—</div>
+        </div>
+        <button id="logout-btn" class="text-xs text-ink-muted bg-surface-muted px-3 py-1.5 rounded-pill border border-line hover:bg-line transition">
+          Sign out
+        </button>
+      </div>
+
+      <!-- Hero -->
+      <div class="bg-lime-soft rounded-2xl p-6 mb-6">
+        <h2 class="font-display text-2xl font-black text-ink leading-tight">Start an<br>Inspection</h2>
+        <p class="text-sm text-ink-muted mt-2">Enter the store or premise details to begin scanning product labels.</p>
+      </div>
+
+      <!-- Session form -->
+      <div class="bg-surface rounded-2xl border border-line p-6 shadow-card">
+        <form id="session-form" class="space-y-4">
+          <div>
+            <label for="session-store" class="block text-sm font-semibold text-ink mb-1.5">Store / Premise Name</label>
+            <input id="session-store" type="text" required placeholder="e.g. Apollo Pharmacy, Hauz Khas"
+              class="w-full px-4 py-3 rounded-xl border border-line bg-surface-muted text-ink placeholder-ink-muted/50 focus:outline-none focus:ring-2 focus:ring-focus transition">
+          </div>
+          <div>
+            <label for="session-location" class="block text-sm font-semibold text-ink mb-1.5">Location <span class="text-ink-muted font-normal">(optional)</span></label>
+            <input id="session-location" type="text" placeholder="e.g. South Extension, New Delhi"
+              class="w-full px-4 py-3 rounded-xl border border-line bg-surface-muted text-ink placeholder-ink-muted/50 focus:outline-none focus:ring-2 focus:ring-focus transition">
+          </div>
+          <button id="session-submit" type="submit"
+            class="w-full bg-ink text-lime font-bold py-3.5 rounded-pill text-base hover:opacity-90 transition">
+            Start Inspection
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ──────────────────────────────────────────────────────────────────
+         VIEW: CAPTURE
+    ────────────────────────────────────────────────────────────────── -->
+    <section id="view-capture" class="view">
+      <!-- Active session bar -->
+      <div class="bg-surface rounded-xl border border-line p-3 mb-5 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 bg-success rounded-full animate-pulse"></span>
+          <span class="text-sm font-semibold text-ink" id="active-session-store">—</span>
+        </div>
+        <span class="text-xs text-ink-muted font-mono" id="active-session-id">—</span>
+      </div>
+      <div class="text-xs text-ink-muted mb-4">📍 <span id="active-session-location">—</span></div>
+
+      <h2 class="font-display text-2xl font-black text-ink mb-2">Scan Product Label</h2>
+      <p class="text-sm text-ink-muted mb-5">Take a photo or upload an image of the product's label showing MRP, weight, manufacturer, and other declarations.</p>
+
+      <!-- Drop zone / Upload -->
+      <div id="drop-zone" class="drop-zone border-2 border-dashed border-line rounded-2xl p-8 text-center cursor-pointer hover:border-orange hover:bg-orange-soft/30 transition-all">
+        <div class="text-4xl mb-3">📸</div>
+        <p class="text-sm font-semibold text-ink mb-1">Tap to capture or upload</p>
+        <p class="text-xs text-ink-muted">or drag and drop an image here</p>
+        <input id="capture-input" type="file" accept="image/*" capture="environment" class="hidden">
+      </div>
+
+      <!-- Preview -->
+      <div id="preview-container" class="hidden mt-4">
+        <img id="preview-img" alt="Captured product label" class="img-preview">
+      </div>
+
+      <!-- Action buttons -->
+      <div class="flex gap-3 mt-5">
+        <button id="retake-btn" class="hidden flex-1 bg-surface text-ink font-semibold py-3 rounded-pill border border-line hover:bg-surface-muted transition">
+          ↩ Retake
+        </button>
+        <button id="scan-submit-btn" class="hidden flex-1 bg-orange text-white font-bold py-3 rounded-pill hover:opacity-90 transition">
+          🔍 Analyze Label
+        </button>
+      </div>
+    </section>
+
+    <!-- ──────────────────────────────────────────────────────────────────
+         VIEW: PROCESSING
+    ────────────────────────────────────────────────────────────────── -->
+    <section id="view-processing" class="view">
+      <div class="text-center py-12">
+        <div class="relative inline-block w-48 h-48 bg-surface-muted rounded-2xl overflow-hidden mb-6 border border-line">
+          <div class="scan-beam"></div>
+          <div class="flex items-center justify-center h-full text-5xl">📋</div>
+        </div>
+        <h2 class="font-display text-xl font-bold text-ink mb-2">Analyzing Label</h2>
+        <p class="text-sm text-ink-muted mb-6">Reading text and checking declarations…</p>
+        <div class="space-y-3 max-w-xs mx-auto text-left">
+          <div class="flex items-center gap-3 text-sm">
+            <span class="animate-spin inline-block w-5 h-5 border-2 border-orange border-t-transparent rounded-full"></span>
+            <span class="text-ink-muted">Preprocessing image…</span>
+          </div>
+          <div class="flex items-center gap-3 text-sm">
+            <span class="w-5 h-5 text-ink-muted/30">○</span>
+            <span class="text-ink-muted/50">Extracting text (OCR)…</span>
+          </div>
+          <div class="flex items-center gap-3 text-sm">
+            <span class="w-5 h-5 text-ink-muted/30">○</span>
+            <span class="text-ink-muted/50">Classifying declarations…</span>
+          </div>
+          <div class="flex items-center gap-3 text-sm">
+            <span class="w-5 h-5 text-ink-muted/30">○</span>
+            <span class="text-ink-muted/50">Checking legal compliance…</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────────────────────────────────────────────────────────────
+         VIEW: RESULT
+    ────────────────────────────────────────────────────────────────── -->
+    <section id="view-result" class="view">
+      <button onclick="App.showView('view-capture')" class="text-sm text-ink-muted font-medium mb-4 inline-flex items-center gap-1 hover:text-ink transition">
+        ← Back to scanner
+      </button>
+
+      <!-- Status hero (dynamically populated) -->
+      <div id="result-hero"></div>
+
+      <!-- Classified fields (dynamically populated) -->
+      <h3 class="font-display text-lg font-bold text-ink mb-3">Detected Declarations</h3>
+      <div id="result-fields" class="grid grid-cols-2 gap-3 mb-6"></div>
+
+      <!-- Violations (dynamically populated) -->
+      <div id="result-violations" class="mb-6"></div>
+
+      <!-- Actions -->
+      <div class="flex gap-3">
+        <button id="result-scan-another" class="flex-1 bg-ink text-lime font-bold py-3.5 rounded-pill hover:opacity-90 transition">
+          📸 Scan Another
+        </button>
+        <button id="result-view-summary" class="flex-1 bg-surface text-ink font-semibold py-3.5 rounded-pill border border-line hover:bg-surface-muted transition">
+          📊 Summary
+        </button>
+      </div>
+    </section>
+
+    <!-- ──────────────────────────────────────────────────────────────────
+         VIEW: SESSION SUMMARY
+    ────────────────────────────────────────────────────────────────── -->
+    <section id="view-summary" class="view">
+      <button onclick="App.showView('view-capture')" class="text-sm text-ink-muted font-medium mb-4 inline-flex items-center gap-1 hover:text-ink transition">
+        ← Back to scanner
+      </button>
+
+      <h2 class="font-display text-2xl font-black text-ink mb-1">Inspection Summary</h2>
+      <p class="text-sm text-ink-muted mb-5">
+        <span id="summary-store" class="font-semibold text-ink">—</span> · <span id="summary-location">—</span>
+      </p>
+
+      <!-- Stats bento -->
+      <div class="grid grid-cols-2 gap-3 mb-6">
+        <div class="bg-surface rounded-xl p-4 border border-line text-center">
+          <div class="text-3xl font-black text-ink" id="summary-total">0</div>
+          <div class="text-xs text-ink-muted font-medium mt-1">Products Scanned</div>
+        </div>
+        <div class="bg-success-soft rounded-xl p-4 border border-success/20 text-center">
+          <div class="text-3xl font-black text-success" id="summary-compliant">0</div>
+          <div class="text-xs text-ink-muted font-medium mt-1">Compliant</div>
+        </div>
+        <div class="bg-danger-soft rounded-xl p-4 border border-danger/20 text-center">
+          <div class="text-3xl font-black text-danger" id="summary-violations">0</div>
+          <div class="text-xs text-ink-muted font-medium mt-1">With Issues</div>
+        </div>
+        <div class="bg-lime-soft rounded-xl p-4 border border-lime/30 text-center">
+          <div class="text-3xl font-black text-ink" id="summary-rate">—</div>
+          <div class="text-xs text-ink-muted font-medium mt-1">Compliance Rate</div>
+        </div>
+      </div>
+
+      <!-- Scan list -->
+      <h3 class="font-display text-lg font-bold text-ink mb-3">Scanned Products</h3>
+      <div id="summary-scan-list" class="space-y-2 mb-6">
+        <div class="text-sm text-ink-muted text-center py-8">No scans yet in this session.</div>
+      </div>
+
+      <button id="summary-scan-next" class="w-full bg-orange text-white font-bold py-3.5 rounded-pill hover:opacity-90 transition">
+        📸 Scan Next Product
+      </button>
+    </section>
+
+  </main>
+
+  <!-- ═══ Bottom Navigation ═══ -->
+  <nav class="fixed bottom-0 inset-x-0 bg-ink border-t border-ink/10 z-40" style="padding-bottom: max(12px, env(safe-area-inset-bottom));">
+    <div class="max-w-lg mx-auto flex items-center justify-around py-2">
+      <button class="bottom-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-white/50 hover:text-lime transition" data-view="view-session">
+        <span class="nav-icon text-lg">🏠</span>
+        <span class="nav-label text-[10px] font-semibold">Home</span>
+      </button>
+      <button class="bottom-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-white/50 hover:text-lime transition" data-view="view-capture">
+        <span class="nav-icon text-lg bg-orange w-10 h-10 rounded-full flex items-center justify-center -mt-5 shadow-float border-4 border-ink">📸</span>
+        <span class="nav-label text-[10px] font-semibold">Scan</span>
+      </button>
+      <button class="bottom-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-white/50 hover:text-lime transition" data-view="view-summary">
+        <span class="nav-icon text-lg">📊</span>
+        <span class="nav-label text-[10px] font-semibold">Summary</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ═══ Scripts ═══ -->
+  <script src="/js/api.js"></script>
+  <script src="/js/offline-queue.js"></script>
+  <script src="/js/app.js"></script>
+
+</body>
+</html>

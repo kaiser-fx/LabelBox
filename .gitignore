@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+eggs/
+*.whl
+
+# Virtual environments
+venv/
+sih2026venv/
+.venv/
+ENV/
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Alembic
+alembic/versions/__pycache__/
+
+# Uploads
+backend/uploads/
+
+# pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
+# mypy
+.mypy_cache/
+
+# markdown files
+memory.md
+Rules.md
+Phases.md
+PRD.md
+Architecture.md
+design.md
+
+
