@@ -1,5 +1,7 @@
 import io
 import json
+import cv2
+import numpy as np
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
@@ -44,6 +46,16 @@ def test_preprocess_valid_image(dummy_jpeg):
     assert len(result.shape) == 2
 
 
+def test_preprocess_large_image_is_downscaled_for_ocr():
+    image = np.full((2000, 3000, 3), 255, dtype=np.uint8)
+    ok, encoded = cv2.imencode(".jpg", image)
+    assert ok
+
+    result = preprocess_image(encoded.tobytes())
+
+    assert result.shape == (1067, 1600)
+
+
 def test_preprocess_real_label_image():
     from pathlib import Path
     image_path = Path(__file__).parent / "test_images" / "biscuit_pack_label.jpg"
@@ -85,6 +97,20 @@ def test_ocr_block_dataclass():
     assert block.confidence == 0.95
     parsed_bbox = json.loads(block.bounding_box_json())
     assert parsed_bbox == [[10, 20], [100, 20], [100, 50], [10, 50]]
+
+
+def test_sort_blocks_reading_order():
+    from app.services.ocr import sort_blocks_reading_order
+
+    b_top_right = OCRBlock("Batch: 123", 0.9, [[500, 100], [600, 100], [600, 120], [500, 120]])
+    b_top_left = OCRBlock("Mfg Dt: 01/2025", 0.9, [[100, 100], [250, 100], [250, 120], [100, 120]])
+    b_bottom = OCRBlock("MRP Rs. 100", 0.9, [[100, 200], [250, 200], [250, 220], [100, 220]])
+
+    unsorted = [b_bottom, b_top_right, b_top_left]
+    sorted_res = sort_blocks_reading_order(unsorted)
+
+    assert [b.text for b in sorted_res] == ["Mfg Dt: 01/2025", "Batch: 123", "MRP Rs. 100"]
+
 
 
 # --- Scan API Endpoints Tests ---

@@ -13,13 +13,18 @@ from app.services.parser import (
 )
 
 
-def _make_block(text: str, confidence: float = 0.9) -> OCRBlock:
+def _make_block(
+    text: str,
+    confidence: float = 0.9,
+    bounding_box: list[list[int]] | None = None,
+) -> OCRBlock:
     """Helper to create an OCRBlock with minimal bounding box."""
     return OCRBlock(
         text=text,
         confidence=confidence,
-        bounding_box=[[0, 0], [100, 0], [100, 30], [0, 30]],
+        bounding_box=bounding_box or [[0, 0], [100, 0], [100, 30], [0, 30]],
     )
+
 
 
 # ── MRP Extraction ──────────────────────────────────────────────────────────
@@ -72,6 +77,16 @@ class TestMRPExtraction:
         result = classify_fields(blocks)
         assert result["mrp"] is not None
         assert "70" in result["mrp"]
+
+    def test_mrp_price_after_date_rows(self):
+        blocks = [
+            _make_block("MRP Rs"),
+            _make_block("01/2024"),
+            _make_block("12/2026"),
+            _make_block("₹ 120"),
+        ]
+        result = classify_fields(blocks)
+        assert result["mrp"] == "MRP Rs ₹ 120"
 
 
 # ── Net Quantity Extraction ──────────────────────────────────────────────────
@@ -314,3 +329,179 @@ class TestFieldConfidences:
     def test_empty_blocks_returns_none(self):
         confidences = get_field_confidences([])
         assert all(v is None for v in confidences.values())
+
+
+class TestOCRArtifactRecovery:
+    def test_mrp_with_ocr_rupee_symbol_artifact(self):
+        """Test MRP when ₹ was misread by OCR as '{' with tax declaration in following block."""
+        blocks = [
+            _make_block("MRP", 0.90, [[312, 506], [350, 502], [350, 524], [314, 528]]),
+            _make_block("{1749.00 (Incl,", 0.85, [[362, 500], [514, 500], [514, 524], [362, 524]]),
+            _make_block("of all Taxes)", 0.90, [[520, 501], [634, 501], [634, 528], [520, 528]]),
+        ]
+        result = classify_fields(blocks)
+        assert result["mrp"] is not None
+        assert "1749.00" in result["mrp"]
+        assert "Taxes" in result["mrp"]
+
+    def test_net_quantity_with_ocr_mi_typo(self):
+        """Test Net Qty when 'ml' was misread by OCR as 'mi' or 'm1'."""
+        blocks = [
+            _make_block("Net Qty::", 0.85),
+            _make_block("200 mi", 0.92),
+        ]
+        result = classify_fields(blocks)
+        assert result["net_quantity"] is not None
+        assert "200 ml" in result["net_quantity"]
+
+    def test_spatial_recovery_when_blocks_separated_in_list(self):
+        """Test that spatial fallback recovers horizontally aligned MRP and price even if separated in list."""
+        blocks = [
+            _make_block("{1749.00 (Incl,", 0.85, [[362, 500], [514, 500], [514, 524], [362, 524]]),
+            _make_block("Unrelated Text", 0.70, [[10, 100], [200, 100], [200, 130], [10, 130]]),
+            _make_block("MRP", 0.90, [[312, 506], [350, 502], [350, 524], [314, 528]]),
+        ]
+        result = classify_fields(blocks)
+        assert result["mrp"] is not None
+        assert "1749.00" in result["mrp"]
+
+    def test_ket_quantity_ocr_typo(self):
+        """Test Net Quantity when 'Net' was misread by OCR as 'Ket' or 'Met'."""
+        blocks = [
+            _make_block("Ket Quantity:", 0.88),
+            _make_block("118 ml", 0.95),
+        ]
+        result = classify_fields(blocks)
+        assert result["net_quantity"] is not None
+        assert "Net" in result["net_quantity"]
+        assert "118 ml" in result["net_quantity"]
+
+    def test_mig_date_with_2digit_year(self):
+        """Test Date when 'Mfg Date' was misread as 'Mig Date' and date is in MM/YY (10/25)."""
+        blocks = [
+            _make_block("10/25", 0.99),
+            _make_block("Mig Date;", 0.85),
+        ]
+        result = classify_fields(blocks)
+        assert result["date_of_manufacture"] is not None
+        assert "10/25" in result["date_of_manufacture"]
+        assert "Mfg Date" in result["date_of_manufacture"]
+
+    def test_rajkamal_namkeen_label_fields(self):
+        """Test Rajkamal Namkeen label pattern (Manufactured & Packed Bv:, email with space, etc)."""
+        blocks = [
+            _make_block("DIET NAVRATAN MIX (200 g)"),
+            _make_block("Net Wt"),
+            _make_block("200 g"),
+            _make_block("Pkdt"),
+            _make_block("05-09-16"),
+            _make_block("MRP IN MUMBAI Rs."),
+            _make_block("70 / -"),
+            _make_block("Manufactured"),
+            _make_block("& Packed Bv:"),
+            _make_block("RaJKAMAL NAMKEENSa PVOLLTD"),
+            _make_block("24/25, Damji"),
+            _make_block("Shamji Ind Est, Vikhroli (WL Mumbai"),
+            _make_block("rajkamalnamkeens@gmail com"),
+            _make_block("Customer care no ."),
+            _make_block("25782103"),
+        ]
+        result = classify_fields(blocks)
+        assert result["mrp"] is not None and "70" in result["mrp"]
+        assert result["net_quantity"] is not None and "200 g" in result["net_quantity"]
+        assert result["date_of_manufacture"] is not None and "05-09-16" in result["date_of_manufacture"]
+        assert result["manufacturer_name"] is not None and "RAJKAMAL NAMKEENS" in result["manufacturer_name"].upper()
+        assert result["manufacturer_address"] is not None and "Mumbai" in result["manufacturer_address"]
+        assert result["consumer_care"] is not None
+
+    def test_performance_protein_label_fields(self):
+        """Test Performance Protein tub pattern (PACK OF 1, split dot-matrix date, (<) MRP)."""
+        blocks = [
+            _make_block("Email: careobeasuien"),
+            _make_block("Mobile"),
+            _make_block("91 9599358358"),
+            _make_block("AnufaciLred Uy:"),
+            _make_block("Fermentis Life Sciences Pvt Ltd"),
+            _make_block("Plot no 22, 41, 48, Sector-8 IMT Manesar, Gurugram, Haryana-122051"),
+            _make_block("MFG. DATE"),
+            _make_block("06"),
+            _make_block("EXPIRY"),
+            _make_block("11"),
+            _make_block("(2825"),
+            _make_block("MRP (<)"),
+            _make_block("2999"),
+            _make_block("00"),
+            _make_block("(Inclusive of all taxes)"),
+            _make_block("PACK OF"),
+        ]
+        result = classify_fields(blocks)
+        assert result["mrp"] is not None and "2999.00" in result["mrp"]
+        assert result["net_quantity"] is not None and "PACK OF 1" in result["net_quantity"]
+        assert result["date_of_manufacture"] is not None and "06/2026" in result["date_of_manufacture"]
+        assert result["manufacturer_name"] is not None and "Fermentis Life Sciences" in result["manufacturer_name"]
+        assert result["manufacturer_address"] is not None and "Gurugram" in result["manufacturer_address"]
+        assert result["consumer_care"] is not None and "9599358358" in result["consumer_care"]
+
+    def test_wild_stone_after_shave_label_fields(self):
+        """Test realistic OCR blocks from Wild Stone label with revised MRP sticker."""
+        blocks = [
+            _make_block("WILD STONE"),
+            _make_block("AFTER SHAVE LOTION"),
+            _make_block("INGREDIENTS : ETHYL ALCOHOL (95 % v/v) ; CONTENT : 85.50"),
+            _make_block("MANUFACTURED"),
+            _make_block("INDIA BY : READ THE FIRST CHARACTER OF THE"),
+            _make_block("MFD: (A) McNAQE CONSUMER PRODUCTS PVT, LTD, PLOT NO,44,45,"),
+            _make_block("488,57,.58,59, SECTOR IB,INTEGRATED INDUSTRIAL ESTATE RANIPUR,"),
+            _make_block("HARIDWAR - 249 403,UTTARAKHAND, INDIA. MFG: LIc, NO. M"),
+            _make_block("MRP"),
+            _make_block("NEW"),
+            _make_block("riio/-"),
+            _make_block("CALL ; +9133 40142100,E-ma"),
+            _make_block("Med ;"),
+            _make_block("(a59/2025"),
+            _make_block("BEST BEFORE"),
+            _make_block("08/2028"),
+            _make_block("NET CONTENT"),
+            _make_block("50 ml"),
+        ]
+        result = classify_fields(blocks)
+        assert result["mrp"] is not None and "110" in result["mrp"]
+        assert result["net_quantity"] is not None and "50 ml" in result["net_quantity"]
+        assert result["date_of_manufacture"] is not None and "09/2025" in result["date_of_manufacture"]
+        assert result["manufacturer_name"] is not None and "McNROE CONSUMER PRODUCTS" in result["manufacturer_name"]
+        assert result["manufacturer_address"] is not None and "RANIPUR" in result["manufacturer_address"]
+        assert result["consumer_care"] is not None and "40142100" in result["consumer_care"]
+
+    def test_honitus_cough_syrup_label_fields(self):
+        """Test realistic OCR blocks from Dabur Honitus label with split Net + Quantity and smudge typo."""
+        blocks = [
+            _make_block("Honitus Cough Syrup"),
+            _make_block("Ayurvedic Medicine"),
+            _make_block("Net"),
+            _make_block("t Quantity:"),
+            _make_block("100 mks"),
+            _make_block("Batch;"),
+            _make_block("Mfd:"),
+            _make_block("Exp,"),
+            _make_block("BD1S1O"),
+            _make_block("MRP Rs"),
+            _make_block("01/2024"),
+            _make_block("12/2026"),
+            _make_block("4120"),
+            _make_block("Mid. by: DabuR INDIA LTD;"),
+            _make_block("109, hpsVDc, Industriat Area, Baddi,"),
+            _make_block("Visf, Solan (HP 0-473205"),
+            _make_block("Regd, Ullice"),
+            _make_block("(onsuMer (cll;"),
+            _make_block("~mail daburcares@dabur (OM"),
+        ]
+        result = classify_fields(blocks)
+        assert result["net_quantity"] is not None and "100 ml" in result["net_quantity"]
+        assert result["manufacturer_name"] is not None and "DabuR INDIA LTD" in result["manufacturer_name"]
+        assert result["manufacturer_address"] is not None and "Baddi" in result["manufacturer_address"]
+        assert result["consumer_care"] is not None and "daburcares@dabur.com" in result["consumer_care"]
+
+
+
+
+

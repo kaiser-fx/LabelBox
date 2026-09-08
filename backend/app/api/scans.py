@@ -14,7 +14,7 @@ from app.db.models.inspection_session import InspectionSession
 from app.db.models.officer import Officer
 from app.db.models.scan import Scan
 from app.db.models.violation import Violation
-from app.rules.registry import run_all_rules
+from app.rules.registry import get_rule, run_all_rules
 import app.rules  # noqa: F401 — triggers @register_rule decorators
 from app.schemas.scan import ComplianceReport, RuleResultResponse, ScanResponse
 from app.services.ocr import extract_text
@@ -165,7 +165,8 @@ async def submit_scan(
                 violation = Violation(
                     scan_id=scan.id,
                     rule_id=r.rule_id,
-                    severity="major",
+                    # Product triage level; it does not purport to be a legal penalty.
+                    severity=get_rule(r.rule_id).severity if get_rule(r.rule_id) else "major",
                     citation=r.citation,
                     reason=r.reason or f"Rule {r.rule_id} check failed.",
                 )

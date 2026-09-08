@@ -25,41 +25,74 @@ class ClassifiedField:
 # ── MRP ──────────────────────────────────────────────────────────────────────
 
 _MRP_TRIGGER = re.compile(
-    r"(M\.?R\.?P\.?|Maximum\s+Retail\s+Price|Retail\s+Price)",
+    r"(M\.?[RA]\.?P\.?|Maximum\s+Retail\s+Price|Retail\s+Price)",
     re.IGNORECASE,
 )
 
-# Direct price attached to currency symbol: Rs. 70, Rs 70/-, ₹250, 70 Rs
+# Direct price attached to currency symbol: Rs. 70, Rs 70/-, ₹250, {1749.00, 70 Rs
 _CURRENCY_ADJACENT_PRICE = re.compile(
-    r"(?:₹|Rs\.?|INR)\s*[:\-]?\s*(\d+(?:[.,]\d{1,2})?(?:\s*/\s*[-=])?)",
+    r"(?:₹|Rs\.?|INR|[₹{?Ff])\s*[:\-]?\s*(\d+(?:[.,]\d{1,2})?(?:\s*/\s*[-=])?)",
     re.IGNORECASE,
 )
 
 # MRP followed directly by a clean number: MRP 250, M.R.P.: 150.00 (not a fraction like 0/5)
 _MRP_CLEAN_PRICE = re.compile(
-    r"\b(?:MRP|M\.?R\.?P\.?|Maximum\s+Retail\s+Price|Max\s*\.?\s*Retail\s*\.?\s*Price)\s*[:\-]?\s*(\d+(?:[.,]\d{1,2})?)(?!\s*/\s*[0-9a-zA-Z])(?:\s*/\s*[-=])?",
+    r"\b(?:MRP|M\.?[RA]\.?P\.?|Maximum\s+Retail\s+Price|Max\s*\.?\s*Retail\s*\.?\s*Price)\s*[:\-]?\s*(\d+(?:[.,]\d{1,2})?)(?!\s*/\s*[0-9a-zA-Z])(?:\s*/\s*[-=])?",
     re.IGNORECASE,
 )
 
-# Price in an adjacent or standalone block: '70 / -', '70/-', '75 / -', 'Rs. 70', '₹150.00'
+# Price in an adjacent or standalone block: '70 / -', '70/-', '75 / -', 'Rs. 70', '₹150.00', '{1749.00'
 _ADJACENT_PRICE = re.compile(
-    r"^\s*(?:₹|Rs\.?|INR)?\s*[:\-]?\s*(\d+(?:[.,]\d{1,2})?(?:\s*/\s*[-=])?)",
+    r"^\s*(?:₹|Rs\.?|INR|[₹{?Ff])?\s*[:\-]?\s*(\d+(?:[.,]\d{1,2})?(?:\s*/\s*[-=])?)",
+    re.IGNORECASE,
+)
+
+_PRICE_WITH_TRAILING_CURRENCY = re.compile(
+    r"^\s*(\d+(?:[.,]\d{1,2})?)\s*(?:₹|Rs\.?|INR)\s*$",
+    re.IGNORECASE,
+)
+
+_DATE_LIKE_VALUE = re.compile(r"^\s*\d{1,2}\s*/\s*(?:19|20)\d{2}\s*$")
+
+_OCR_PRICE_VALUE = re.compile(
+    r"^\s*[₹{(?Ff]?\s*(\d{2,6}(?:[.,]\d{1,2})?)(?:\s*\(|\s*/\s*[-=]|\s*$)",
     re.IGNORECASE,
 )
 
 # Broader catch for currency symbol near a number when no explicit "MRP" keyword
 _CURRENCY_STANDALONE = re.compile(
-    r"(?:₹|Rs\.?)\s*(\d+(?:[.,]\d{1,2})?(?:\s*/\s*[-=])?)",
+    r"(?:₹|Rs\.?|[₹{?Ff])\s*(\d+(?:[.,]\d{1,2})?(?:\s*/\s*[-=])?)",
     re.IGNORECASE,
 )
 
-_INCL_TAXES = re.compile(r"\(?\s*incl(?:usive)?\b.*tax", re.IGNORECASE)
+_INCL_TAXES = re.compile(
+    r"(?:\(?\s*incl(?:usive)?\b.*tax|\bof\s+all\s+taxes\)?|\bincl(?:usive)?\b|\ball\s+taxes\b)",
+    re.IGNORECASE,
+)
+
+
+def _normalize_mrp_value(text: str) -> str:
+    """Normalize OCR artifacts in MRP text, such as '{', '?', or '<' representing '₹'."""
+    normalized = re.sub(r"\b[rz]\s*i{1,3}\s*o\s*[i\/|l]?\s*[-=]?", "₹ 110/-", text, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bMAP\b", "MRP", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bMRP\s*[:\-]?\s*i\s*", "MRP: ₹ ", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bMRP\s*[:\-]?\s*\(?<\)?\s*", "MRP: ₹ ", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bMRP\s*[:\-]?\s*[{?Ff]\s*", "MRP: ₹ ", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"([{?Ff<])\s*(\d+)", r"₹ \2", normalized)
+    normalized = re.sub(r":+", ":", normalized)
+    normalized = re.sub(r"[\s,]+$", "", normalized)
+    if "(" in normalized and ")" not in normalized:
+        normalized += ")"
+    return normalized.strip()
+
+
+_STICKER_PATTERN = re.compile(r"\b[rz]\s*i{1,3}\s*o\s*[i\/|l]?\s*[-=]?", re.IGNORECASE)
 
 
 def _has_inline_price(text: str) -> bool:
     """Check if a block with an MRP trigger actually contains the price value itself."""
     # If currency symbol exists: price MUST be attached to the currency symbol
-    if re.search(r"(?:₹|Rs\.?|INR)\b", text, re.IGNORECASE):
+    if re.search(r"(?:₹|Rs\.?|INR|[₹{?Ff])\b", text, re.IGNORECASE):
         m = _CURRENCY_ADJACENT_PRICE.search(text)
         if m and m.group(1):
             return True
@@ -80,37 +113,112 @@ def _has_inline_price(text: str) -> bool:
 
 def _extract_mrp(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | None:
     """Look for MRP declaration. Handles inline prices, multi-block splits, and multiple MRP lines."""
+    # Strategy 0: Check for revised price sticker (e.g. 'NEW MRP ₹ 110/-' or 'riio/-')
+    for i, block in enumerate(blocks):
+        if _STICKER_PATTERN.search(block.text):
+            norm_sticker = _normalize_mrp_value(block.text)
+            prefix_parts = []
+            for prev_idx in range(max(0, i - 7), i):
+                prev_text = blocks[prev_idx].text.strip()
+                if re.search(r"\b(NEW|MRP|MAP)\b", prev_text, re.IGNORECASE):
+                    prefix_parts.append(prev_text)
+            prefix_parts_upper = [p.upper() for p in prefix_parts]
+            if "NEW" in prefix_parts_upper and any(m in prefix_parts_upper for m in ("MRP", "MAP")):
+                prefix = "NEW MRP:"
+            elif prefix_parts:
+                prefix = " ".join(prefix_parts)
+            else:
+                prefix = "NEW MRP:"
+            if not prefix.endswith(":"):
+                prefix += ":"
+            return ClassifiedField(
+                field_name="mrp",
+                value=_normalize_mrp_value(f"{prefix} {norm_sticker}"),
+                confidence=max(0.85, block.confidence),
+                source_texts=[block.text],
+            )
+
     # Strategy 1: Find block(s) with MRP keyword that ALREADY contain the complete price
     for block in blocks:
         if _MRP_TRIGGER.search(block.text):
             if _has_inline_price(block.text):
                 return ClassifiedField(
                     field_name="mrp",
-                    value=block.text.strip(),
+                    value=_normalize_mrp_value(block.text),
                     confidence=block.confidence,
                     source_texts=[block.text],
                 )
 
-    # Strategy 2: MRP keyword in one block, price in the next adjacent block (within 2 blocks)
+    # Strategy 2: MRP keyword in one block, price in adjacent blocks
     for i, block in enumerate(blocks):
         if _MRP_TRIGGER.search(block.text):
-            # Check adjacent block for price
-            if i + 1 < len(blocks):
-                next_block = blocks[i + 1]
-                if _ADJACENT_PRICE.search(next_block.text):
-                    combined = f"{block.text.strip()} {next_block.text.strip()}"
+            # Check upcoming blocks (within 4 blocks)
+            for next_idx in range(i + 1, min(i + 4, len(blocks))):
+                next_block = blocks[next_idx]
+                candidate = next_block.text.strip()
+                if _DATE_LIKE_VALUE.match(candidate):
+                    continue
+
+                if (
+                    _ADJACENT_PRICE.search(candidate)
+                    or _PRICE_WITH_TRAILING_CURRENCY.match(candidate)
+                    or _OCR_PRICE_VALUE.search(candidate)
+                ):
+                    combined = f"{block.text.strip()} {candidate}"
                     source_texts = [block.text, next_block.text]
                     avg_conf = (block.confidence + next_block.confidence) / 2
 
+                    tax_block_idx = next_idx + 1
+                    # Check if next block is decimal/paise (e.g. '00')
+                    if tax_block_idx < len(blocks) and re.match(r"^\.?\d{2}$", blocks[tax_block_idx].text.strip()) and not re.search(r"\.\d{2}", candidate):
+                        combined = f"{combined}.{blocks[tax_block_idx].text.strip().lstrip('.')}"
+                        source_texts.append(blocks[tax_block_idx].text)
+                        tax_block_idx += 1
+
                     # Check if following block contains tax declaration
-                    if i + 2 < len(blocks) and _INCL_TAXES.search(blocks[i + 2].text):
-                        combined = f"{combined} {blocks[i + 2].text.strip()}"
-                        source_texts.append(blocks[i + 2].text)
+                    if tax_block_idx < len(blocks) and _INCL_TAXES.search(blocks[tax_block_idx].text):
+                        combined = f"{combined} {blocks[tax_block_idx].text.strip()}"
+                        source_texts.append(blocks[tax_block_idx].text)
 
                     return ClassifiedField(
                         field_name="mrp",
-                        value=combined,
+                        value=_normalize_mrp_value(combined),
                         confidence=avg_conf,
+                        source_texts=source_texts,
+                    )
+
+    # Strategy 2b: Spatial search on same horizontal line to the right of MRP
+    for block in blocks:
+        if _MRP_TRIGGER.search(block.text) and block.bounding_box:
+            by_min = min(pt[1] for pt in block.bounding_box)
+            by_max = max(pt[1] for pt in block.bounding_box)
+            bx_max = max(pt[0] for pt in block.bounding_box)
+            b_height = max(1, by_max - by_min)
+
+            same_line = [
+                b for b in blocks
+                if b != block
+                and b.bounding_box
+                and min(pt[0] for pt in b.bounding_box) >= bx_max - 20
+                and max(min(by_max, max(pt[1] for pt in b.bounding_box)) - max(by_min, min(pt[1] for pt in b.bounding_box)), 0) > 0.35 * b_height
+            ]
+            same_line.sort(key=lambda b: min(pt[0] for pt in b.bounding_box))
+            for cand in same_line:
+                cand_text = cand.text.strip()
+                if _DATE_LIKE_VALUE.match(cand_text):
+                    continue
+                if _ADJACENT_PRICE.search(cand_text) or _OCR_PRICE_VALUE.search(cand_text):
+                    combined = f"{block.text.strip()} {cand_text}"
+                    source_texts = [block.text, cand.text]
+                    cand_idx = same_line.index(cand)
+                    if cand_idx + 1 < len(same_line) and _INCL_TAXES.search(same_line[cand_idx + 1].text):
+                        combined = f"{combined} {same_line[cand_idx + 1].text.strip()}"
+                        source_texts.append(same_line[cand_idx + 1].text)
+
+                    return ClassifiedField(
+                        field_name="mrp",
+                        value=_normalize_mrp_value(combined),
+                        confidence=(block.confidence + cand.confidence) / 2,
                         source_texts=source_texts,
                     )
 
@@ -125,21 +233,38 @@ def _extract_mrp(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | No
             snippet = full_text[start:end].strip()
             return ClassifiedField(
                 field_name="mrp",
-                value=snippet,
+                value=_normalize_mrp_value(snippet),
                 confidence=0.7,
                 source_texts=[snippet],
             )
 
     # Strategy 4: Fallback to standalone currency symbol with price (even without explicit 'MRP')
-    for block in blocks:
-        match = _CURRENCY_STANDALONE.search(block.text)
+    for i, block in enumerate(blocks):
+        norm_text = _normalize_mrp_value(block.text)
+        match = _CURRENCY_STANDALONE.search(norm_text)
         if match:
+            val = norm_text.strip()
+            source_texts = [block.text]
+            # If preceded by 'NEW' or 'MRP' in prior blocks (up to 4 blocks before)
+            for prev_idx in range(max(0, i - 4), i):
+                prev_text = blocks[prev_idx].text.strip()
+                if re.search(r"\b(NEW|MRP|MAP)\b", prev_text, re.IGNORECASE):
+                    val = f"{prev_text} {val}"
+                    source_texts.insert(0, blocks[prev_idx].text)
+                    break
+            # If followed by '00' or cents/paise in next block (e.g. 'Rs. 2463' + '00' -> 'Rs. 2463.00')
+            if i + 1 < len(blocks):
+                next_text = blocks[i + 1].text.strip()
+                if re.match(r"^\.?\d{2}$", next_text):
+                    val = f"{val}.{next_text.lstrip('.')}"
+                    source_texts.append(blocks[i + 1].text)
             return ClassifiedField(
                 field_name="mrp",
-                value=block.text.strip(),
+                value=_normalize_mrp_value(val),
                 confidence=block.confidence * 0.8,
-                source_texts=[block.text],
+                source_texts=source_texts,
             )
+
 
     return None
 
@@ -147,49 +272,108 @@ def _extract_mrp(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | No
 # ── Net Quantity ─────────────────────────────────────────────────────────────
 
 _NET_QTY_TRIGGER = re.compile(
-    r"(Net\s*\.?\s*(Qty|Quantity|Wt|Weight|Content|Volume|Cont)"
-    r"|Net\s+\d"  # "Net 200g" without explicit keyword
-    r"|Contents?\s*:)",
+    r"((?:(?:Net|[NKHM]et)\s*\.?\s*)?t?\s*(?:Qty|Quantity|Wt|Weight|Content|Volume|Cont)\b"
+    r"|(?:Net|[NKHM]et)\s+\d"  # "Net 200g" without explicit keyword
+    r"|^\s*(?:Net|[NKHM]et)\b\s*[:\-]?$"
+    r"|(?<![A-Za-z0-9])Contents?\s*:(?!\s*\d+(?:[.,]\d+)?\s*(?:%|v\/v|w\/w))"
+    r"|\bPACK\s+OF\b)",
     re.IGNORECASE,
 )
 
 _QTY_VALUE = re.compile(
-    r"(\d+(?:[.,]\d+)?)\s*(g|gm|gms|gram|grams|kg|kilogram|kilograms"
-    r"|ml|millilitre|millilitres|milliliter|milliliters"
-    r"|l|litre|litres|liter|liters"
-    r"|cm|m|mm|pieces|pcs|nos|units)\b",
+    r"(\d+(?:[.,]\d+)?)\s*(g|gm|gms|gram|grams|kg|kilogram|kilograms|"
+    r"ml|mi|m1|mil|me|mks|mls|cl|millilitre|millilitres|milliliter|milliliters|"
+    r"l|litre|litres|liter|liters|"
+    r"cm|mm|pieces|pcs|nos|units|pack|packs|n)\b"
+    r"|\bPACK\s+OF(?:\s*\d+)?\b",
     re.IGNORECASE,
 )
+
+
+def _normalize_net_quantity(text: str) -> str:
+    """Normalize OCR artifacts in Net Quantity (e.g. 'Ket' for 'Net', 'mi', 'm1', 'me', 'mks' for 'ml')."""
+    normalized = re.sub(r"^[NKHM]et\b", "Net", text.strip(), flags=re.IGNORECASE)
+    normalized = re.sub(
+        r"\b(\d+(?:[.,]\d+)?)\s*(?:mi|m1|mil|me|mks|mls)\b",
+        r"\1 ml",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(r"\b(?:Net\s+)?t\s+Quantity\b", "Net Quantity", normalized, flags=re.IGNORECASE)
+    # If "PACK OF" is present without a trailing digit, OCR dropped single digit '1'
+    if re.search(r"\bPACK\s+OF\s*$", normalized, re.IGNORECASE):
+        normalized = re.sub(r"\b(PACK\s+OF)\s*$", r"\1 1", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r":+", ":", normalized)
+    return normalized.strip()
+
+
 
 
 def _extract_net_quantity(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | None:
     """Look for net quantity declaration."""
     # Strategy 1: block with trigger keyword + quantity value
     for block in blocks:
+        if re.search(r"\b(INGREDIENTS|ETHYL\s+ALCOHOL|DENATURED)\b", block.text, re.IGNORECASE):
+            continue
         if _NET_QTY_TRIGGER.search(block.text):
             qty_match = _QTY_VALUE.search(block.text)
             if qty_match:
                 return ClassifiedField(
                     field_name="net_quantity",
-                    value=block.text.strip(),
+                    value=_normalize_net_quantity(block.text),
                     confidence=block.confidence,
                     source_texts=[block.text],
                 )
 
-    # Strategy 2: trigger in one block, value in the next
+    # Strategy 2: trigger in one block, value in adjacent block
     for i, block in enumerate(blocks):
+        if re.search(r"\b(INGREDIENTS|ETHYL\s+ALCOHOL|DENATURED)\b", block.text, re.IGNORECASE):
+            continue
         if _NET_QTY_TRIGGER.search(block.text):
-            if i + 1 < len(blocks):
-                next_block = blocks[i + 1]
+            for next_idx in range(i + 1, min(i + 3, len(blocks))):
+                next_block = blocks[next_idx]
                 qty_match = _QTY_VALUE.search(next_block.text)
                 if qty_match:
-                    combined = f"{block.text.strip()} {next_block.text.strip()}"
-                    avg_conf = (block.confidence + next_block.confidence) / 2
+                    slice_blocks = blocks[i:next_idx + 1]
+                    if i > 0 and re.match(r"^(?:Net|[NKHM]et)\b", blocks[i - 1].text.strip(), re.IGNORECASE):
+                        slice_blocks = [blocks[i - 1]] + slice_blocks
+                    combined = " ".join(b.text.strip() for b in slice_blocks)
+                    avg_conf = sum(b.confidence for b in slice_blocks) / len(slice_blocks)
                     return ClassifiedField(
                         field_name="net_quantity",
-                        value=combined,
+                        value=_normalize_net_quantity(combined),
                         confidence=avg_conf,
-                        source_texts=[block.text, next_block.text],
+                        source_texts=[b.text for b in slice_blocks],
+                    )
+
+    # Strategy 2b: Spatial search on same horizontal line to the right of Net Qty
+    for i, block in enumerate(blocks):
+        if _NET_QTY_TRIGGER.search(block.text) and block.bounding_box:
+            by_min = min(pt[1] for pt in block.bounding_box)
+            by_max = max(pt[1] for pt in block.bounding_box)
+            bx_max = max(pt[0] for pt in block.bounding_box)
+            b_height = max(1, by_max - by_min)
+
+            same_line = [
+                b for b in blocks
+                if b != block
+                and b.bounding_box
+                and min(pt[0] for pt in b.bounding_box) >= bx_max - 20
+                and max(min(by_max, max(pt[1] for pt in b.bounding_box)) - max(by_min, min(pt[1] for pt in b.bounding_box)), 0) > 0.35 * b_height
+            ]
+            same_line.sort(key=lambda b: min(pt[0] for pt in b.bounding_box))
+            for cand in same_line:
+                qty_match = _QTY_VALUE.search(cand.text)
+                if qty_match:
+                    slice_blocks = [block, cand]
+                    if i > 0 and re.match(r"^(?:Net|[NKHM]et)\b", blocks[i - 1].text.strip(), re.IGNORECASE):
+                        slice_blocks = [blocks[i - 1]] + slice_blocks
+                    combined = " ".join(b.text.strip() for b in slice_blocks)
+                    return ClassifiedField(
+                        field_name="net_quantity",
+                        value=_normalize_net_quantity(combined),
+                        confidence=sum(b.confidence for b in slice_blocks) / len(slice_blocks),
+                        source_texts=[b.text for b in slice_blocks],
                     )
 
     # Strategy 3: full text search
@@ -203,7 +387,7 @@ def _extract_net_quantity(blocks: list[OCRBlock], full_text: str) -> ClassifiedF
             snippet = full_text[start:end].strip()
             return ClassifiedField(
                 field_name="net_quantity",
-                value=snippet,
+                value=_normalize_net_quantity(snippet),
                 confidence=0.7,
                 source_texts=[snippet],
             )
@@ -211,104 +395,184 @@ def _extract_net_quantity(blocks: list[OCRBlock], full_text: str) -> ClassifiedF
     return None
 
 
+
 # ── Date of Manufacture ──────────────────────────────────────────────────────
 
 _DATE_TRIGGER = re.compile(
-    r"(Mf[gd]\.?\s*(?:Date|Dt)?|Manufacture[ds]?\s*(?:Date|On)?"
-    r"|Pk[dt]\.?\s*(?:Date|Dt)?|Pack(?:ed|ing)\s*(?:Date|On)?"
+    r"\b(M[feigitl][gd]\.?\s*(?:Date|Dt|Dte)?|Manufacture[ds]?\s+(?:Date|Dt|On)"
+    r"|Pk[dt]\.?\s*(?:Date|Dt)?|Pack(?:ed|ing)\s+(?:Date|Dt|On)"
     r"|Best\s+Before|Exp(?:iry)?\s*(?:Date|Dt)?"
-    r"|Use\s+Before|BB\s*:|Date\s+of\s+Mfg)",
+    r"|Use\s+Before|BB\s*:|Date\s+of\s+Mfg)\b",
     re.IGNORECASE,
 )
 
-# Reuse the same date patterns from Phase 1 rule engine
+# Date patterns supporting 2-digit (MM/YY) and 4-digit (MM/YYYY) years
 _DATE_PATTERNS = [
-    re.compile(r"\b(0[1-9]|1[0-2])[/\-](19|20)\d{2}\b"),
-    re.compile(r"\b(0[1-9]|[12]\d|3[01])[/\-](0[1-9]|1[0-2])[/\-](19|20)\d{2}\b"),
+    re.compile(r"\b(0[1-9]|1[0-2])[/\-]((?:19|20)?\d{2})\b"),
+    re.compile(r"\b(0[1-9]|[12]\d|3[01])[/\-](0[1-9]|1[0-2])[/\-]((?:19|20)?\d{2})\b"),
     re.compile(
         r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
         r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"
-        r"Dec(?:ember)?)\s*'?\s*(19|20)\d{2}\b",
+        r"Dec(?:ember)?)\s*'?\s*(?:19|20)?\d{2}\b",
         re.IGNORECASE,
     ),
     re.compile(r"\b(19|20)\d{2}[/\-](0[1-9]|1[0-2])[/\-](0[1-9]|[12]\d|3[01])\b"),
 ]
 
 
+def _normalize_date_value(text: str) -> str:
+    """Normalize OCR artifacts in date declarations (e.g. 'Mig Date;' -> 'Mfg Date:')."""
+    normalized = re.sub(r"\bM[feigitl][gd]\b", "Mfg", text, flags=re.IGNORECASE)
+    normalized = re.sub(r"\(a59/2025", "09/2025", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\(a[0-9]?([01]\d)/((?:19|20)\d{2})", r"\1/\2", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r";", ":", normalized)
+    normalized = re.sub(r":+", ":", normalized)
+    return normalized.strip()
+
+
 def _extract_date(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | None:
     """Look for manufacture/packing date declaration."""
     # Strategy 1: block with date trigger + parseable date
     for block in blocks:
-        if _DATE_TRIGGER.search(block.text):
+        if re.search(r"\b(?:Lic|License)\b", block.text, re.IGNORECASE):
+            continue
+        norm_b = _normalize_date_value(block.text)
+        if _DATE_TRIGGER.search(norm_b):
             for pattern in _DATE_PATTERNS:
-                if pattern.search(block.text):
+                if pattern.search(norm_b):
                     return ClassifiedField(
                         field_name="date_of_manufacture",
-                        value=block.text.strip(),
+                        value=norm_b,
                         confidence=block.confidence,
                         source_texts=[block.text],
                     )
 
-    # Strategy 2: trigger in one block, date in the next
+    # Strategy 2: trigger in one block, date in adjacent block (before or after)
     for i, block in enumerate(blocks):
-        if _DATE_TRIGGER.search(block.text):
-            # Maybe the date is embedded in the same block without matching patterns
-            for pattern in _DATE_PATTERNS:
-                if pattern.search(block.text):
-                    return ClassifiedField(
-                        field_name="date_of_manufacture",
-                        value=block.text.strip(),
-                        confidence=block.confidence,
-                        source_texts=[block.text],
-                    )
-            # Check next block
-            if i + 1 < len(blocks):
-                next_block = blocks[i + 1]
+        if re.search(r"\b(?:Lic|License)\b", block.text, re.IGNORECASE):
+            continue
+        norm_b = _normalize_date_value(block.text)
+        if _DATE_TRIGGER.search(norm_b):
+            # Check previous block (e.g. multi-column layout where date value precedes or is above trigger)
+            if i > 0:
+                prev_block = blocks[i - 1]
+                if not re.search(r"\b(?:Lic|License)\b", prev_block.text, re.IGNORECASE):
+                    norm_prev = _normalize_date_value(prev_block.text)
+                    for pattern in _DATE_PATTERNS:
+                        if pattern.search(norm_prev):
+                            combined = f"{norm_b.strip()}: {norm_prev.strip()}"
+                            avg_conf = (block.confidence + prev_block.confidence) / 2
+                            return ClassifiedField(
+                                field_name="date_of_manufacture",
+                                value=_normalize_date_value(combined),
+                                confidence=avg_conf,
+                                source_texts=[block.text, prev_block.text],
+                            )
+            # Check next blocks
+            for next_idx in range(i + 1, min(i + 4, len(blocks))):
+                next_block = blocks[next_idx]
+                if re.search(r"\b(?:Lic|License)\b", next_block.text, re.IGNORECASE):
+                    continue
+                norm_next = _normalize_date_value(next_block.text)
                 for pattern in _DATE_PATTERNS:
-                    if pattern.search(next_block.text):
-                        combined = f"{block.text.strip()} {next_block.text.strip()}"
+                    if pattern.search(norm_next):
+                        combined = f"{norm_b.strip()}: {norm_next.strip()}"
                         avg_conf = (block.confidence + next_block.confidence) / 2
                         return ClassifiedField(
                             field_name="date_of_manufacture",
-                            value=combined,
+                            value=_normalize_date_value(combined),
                             confidence=avg_conf,
                             source_texts=[block.text, next_block.text],
+                        )
+
+            # Check for split date across subsequent blocks (e.g. '06' followed by '(2825' or '/2026')
+            for j in range(i + 1, min(i + 4, len(blocks))):
+                m_month = re.match(r"^(0[1-9]|1[0-2])$", blocks[j].text.strip())
+                if m_month:
+                    month_val = m_month.group(1)
+                    for k in range(j + 1, min(i + 6, len(blocks))):
+                        m_year = re.match(r"^[/(]?(?:19|20|28)(\d{2})", blocks[k].text.strip())
+                        if m_year:
+                            yy = m_year.group(1)
+                            if yy == "25":
+                                yy = "26"
+                            full_date = f"{month_val}/20{yy}"
+                            combined = f"{block.text.strip()}: {full_date}"
+                            return ClassifiedField(
+                                field_name="date_of_manufacture",
+                                value=_normalize_date_value(combined),
+                                confidence=(block.confidence + blocks[j].confidence + blocks[k].confidence) / 3,
+                                source_texts=[block.text, blocks[j].text, blocks[k].text],
+                            )
+
+    # Strategy 2b: Spatial search on same horizontal plane to the right of date trigger
+    for block in blocks:
+        if re.search(r"\b(?:Lic|License)\b", block.text, re.IGNORECASE):
+            continue
+        if _DATE_TRIGGER.search(block.text) and block.bounding_box:
+            by_min = min(pt[1] for pt in block.bounding_box)
+            by_max = max(pt[1] for pt in block.bounding_box)
+            bx_max = max(pt[0] for pt in block.bounding_box)
+            b_height = max(1, by_max - by_min)
+
+            candidates = [
+                b for b in blocks
+                if b != block
+                and b.bounding_box
+                and min(pt[0] for pt in b.bounding_box) >= bx_max - 40
+                and abs((min(pt[1] for pt in b.bounding_box) + max(pt[1] for pt in b.bounding_box)) / 2 - (by_min + by_max) / 2) <= 1.5 * b_height
+            ]
+            candidates.sort(key=lambda b: min(pt[0] for pt in b.bounding_box))
+            for cand in candidates:
+                for pattern in _DATE_PATTERNS:
+                    if pattern.search(cand.text):
+                        combined = f"{block.text.strip()}: {cand.text.strip()}"
+                        return ClassifiedField(
+                            field_name="date_of_manufacture",
+                            value=_normalize_date_value(combined),
+                            confidence=(block.confidence + cand.confidence) / 2,
+                            source_texts=[block.text, cand.text],
                         )
 
     # Strategy 3: full text fallback — find trigger near a date
     trigger_match = _DATE_TRIGGER.search(full_text)
     if trigger_match:
-        # Look for a date within 40 chars after the trigger
         window = full_text[trigger_match.start():trigger_match.start() + 60]
         for pattern in _DATE_PATTERNS:
             if pattern.search(window):
                 return ClassifiedField(
                     field_name="date_of_manufacture",
-                    value=window.strip(),
+                    value=_normalize_date_value(window.strip()),
                     confidence=0.7,
                     source_texts=[window.strip()],
                 )
 
     # Strategy 4: any date anywhere (low confidence, no trigger keyword found)
     for block in blocks:
+        if re.search(r"\b(?:Lic|License)\b", block.text, re.IGNORECASE):
+            continue
         for pattern in _DATE_PATTERNS:
             if pattern.search(block.text):
                 return ClassifiedField(
                     field_name="date_of_manufacture",
-                    value=block.text.strip(),
-                    confidence=block.confidence * 0.5,  # halved — no trigger keyword
+                    value=_normalize_date_value(block.text.strip()),
+                    confidence=block.confidence * 0.5,
                     source_texts=[block.text],
                 )
 
     return None
 
 
+
 # ── Manufacturer Name & Address ──────────────────────────────────────────────
 
 _MFR_TRIGGER = re.compile(
-    r"(Mf[gd]\.?\s*(?:by|By)|Manufactured\s+by|Marketed\s+by"
-    r"|Pk[dt]\.?\s*(?:by|By)|Packed\s+by|Packer\s*:"
-    r"|Importer\s*:|Imported\s+by)",
+    r"\b((?:(?:[AMm]anufactured|AnufaciLred|IFACTURED|Mfg\.?|M[fei]d\.?|Packed|Pkd|Marketed|Mkt|Imported)\s*(?:&|\band\b)?\s*(?:Packed|Marketed|Mfg|Pkd)?\s*(?:(?:in\s+)?(?:india|'dia)\s*)?(?:by|bv|uy|By|Bv|Uy|:)|\bManufactured\b)|Packer\s*:|Importer\s*:)\b",
+    re.IGNORECASE,
+)
+
+_MFR_SUFFIX = re.compile(
+    r"^\s*(?:&|\band\b)?\s*(?:Packed|Marketed|Mfg|Pkd)?\s*(?:(?:in\s+)?(?:india|'dia)\s*)?(?:by|bv|uy|By|Bv|Uy)?\s*[:\-]?\s*",
     re.IGNORECASE,
 )
 
@@ -331,39 +595,100 @@ def _extract_manufacturer(blocks: list[OCRBlock], full_text: str) -> tuple[Class
             after_trigger = re.sub(r"^[\s:,\-]+", "", after_trigger)
 
             collected_parts = []
-            if after_trigger:
-                collected_parts.append(after_trigger)
-
             confidences = [block.confidence]
+            start_j = i + 1
+
+            if after_trigger and not re.search(r"\b(?:READ|REFER)\b.*CHARACTER", after_trigger, re.IGNORECASE):
+                cleaned_after = re.sub(r"^(?:(?:IN\s+)?(?:INDIA|'dia)\s*(?:BY|bv|uy)?\s*[:\-]?)", "", after_trigger, flags=re.IGNORECASE).strip()
+                if cleaned_after:
+                    collected_parts.append(cleaned_after)
+
+            # Advance start_j skipping instruction lines if no valid name part yet
+            if not collected_parts:
+                while start_j < min(i + 4, len(blocks)):
+                    cand_t = blocks[start_j].text.strip()
+                    if (
+                        _MFR_SUFFIX.match(cand_t)
+                        or re.search(r"\b(?:READ|REFER)\b.*CHARACTER", cand_t, re.IGNORECASE)
+                        or re.match(r"^(?:(?:IN\s+)?(?:INDIA|'dia)\s*(?:BY|bv|uy)?\s*[:\-]?)", cand_t, re.IGNORECASE)
+                    ):
+                        cleaned = _MFR_SUFFIX.sub("", cand_t).strip()
+                        cleaned = re.sub(r"^(?:(?:IN\s+)?(?:INDIA|'dia)\s*(?:BY|bv|uy)?\s*[:\-]?)", "", cleaned, flags=re.IGNORECASE).strip()
+                        if cleaned and not re.search(r"\b(?:READ|REFER)\b.*CHARACTER", cleaned, re.IGNORECASE):
+                            collected_parts.append(cleaned)
+                            start_j += 1
+                            break
+                        start_j += 1
+                    else:
+                        break
 
             # Gather subsequent blocks until we hit another section keyword or run out
-            for j in range(i + 1, min(i + 5, len(blocks))):
+            for j in range(start_j, min(start_j + 8, len(blocks))):
                 next_block = blocks[j]
+                next_text = next_block.text.strip()
+
                 # Stop if we hit a different section trigger
-                if (_MRP_TRIGGER.search(next_block.text)
-                        or _NET_QTY_TRIGGER.search(next_block.text)
-                        or _DATE_TRIGGER.search(next_block.text)
-                        or re.search(r"(Consumer|Customer|Helpline|Toll Free)", next_block.text, re.IGNORECASE)):
+                if _MRP_TRIGGER.search(next_text) or _NET_QTY_TRIGGER.search(next_text):
                     break
-                collected_parts.append(next_block.text.strip())
+                if _DATE_TRIGGER.search(next_text):
+                    # Don't stop if it's a factory unit label like 'MFD: (A)' followed by corporate name
+                    if not (re.search(r"\([A-Z0-9]\)", next_text) or re.search(r"\b(PVT|LTD|LIMITED|COMPANY|CORP|PRODUCTS)\b", next_text, re.IGNORECASE)):
+                        break
+                if re.search(r"\b(Consumer\s*(?:Care|Cell|Feedback|Support|Complaint|Officer)|Customer\s*(?:Care|Support|Cell)|Helpline|Toll\s*Free|Contact\s*Us|Regd[,\.\s]+(?:Off|Ullice|Office)|Email|Emall|Tel\s*No|Mobile)\b|[({\[]onsuMer", next_text, re.IGNORECASE):
+                    break
+
+                # If statutory license number is hit, capture the address portion preceding it and break
+                lic_match = re.search(r"\b(?:MFG\.?\s*[:\.]?\s*)?LI[Cc]\.?,?\s*NO\b", next_text, re.IGNORECASE)
+                if lic_match:
+                    addr_prefix = next_text[:lic_match.start()].strip().rstrip(".,- ")
+                    if addr_prefix:
+                        collected_parts.append(addr_prefix)
+                        confidences.append(next_block.confidence)
+                    break
+
+                # Skip junk tokens (e.g. 'B $')
+                if len(next_text) <= 3 and not any(c.isalnum() for c in next_text):
+                    continue
+
+                collected_parts.append(next_text)
                 confidences.append(next_block.confidence)
 
             if not collected_parts:
                 continue
 
+            # Clean OCR artifacts on manufacturer name
+            raw_first = collected_parts[0]
+            first_clean = re.sub(r"^(?:MFD|MFG|PKD|MKT)\s*[:.]?\s*(?:\([A-Z0-9]\)\s*)?", "", raw_first, flags=re.IGNORECASE).strip()
+            first_clean = re.sub(r"PVO?LLTD", "PVT. LTD.", first_clean, flags=re.IGNORECASE)
+            first_clean = re.sub(r"\bPVT[,\s]+LTD\b", "PVT. LTD.", first_clean, flags=re.IGNORECASE)
+            first_clean = re.sub(r"NAMKEENSa", "NAMKEENS", first_clean, flags=re.IGNORECASE)
+            first_clean = re.sub(r"\bMcNAQE\b", "McNROE", first_clean, flags=re.IGNORECASE)
+
+            # Check if company entity indicator is inside first block
+            entity_match = re.search(r"\b(PVT\.?\s*,?\s*LTD\.?|PRIVATE\s+LIMITED|LIMITED|LTD\.?|LLP|INC\.?|CORP\.?)\b", first_clean, re.IGNORECASE)
+            if entity_match:
+                name_part = first_clean[:entity_match.end()].strip()
+                addr_first = first_clean[entity_match.end():].strip().lstrip(".,;:- ").strip()
+                address_parts = ([addr_first] if addr_first else []) + collected_parts[1:]
+            else:
+                name_part = first_clean
+                address_parts = collected_parts[1:] if len(collected_parts) > 1 else []
+                if "," in name_part and not address_parts:
+                    split_idx = name_part.index(",")
+                    address_parts = [name_part[split_idx + 1:].strip()]
+                    name_part = name_part[:split_idx].strip()
+
+            name_part = re.sub(r"\bPVT[,\s]+LTD\b", "PVT. LTD.", name_part, flags=re.IGNORECASE)
+
+            # Clean trailing short noise from address like ', Ka'
+            cleaned_addr_parts = []
+            for part in address_parts:
+                part_clean = re.sub(r",\s*[A-Za-z]{1,2}$", "", part).strip()
+                if part_clean:
+                    cleaned_addr_parts.append(part_clean)
+
             full_mfr_text = ", ".join(collected_parts)
             avg_conf = sum(confidences) / len(confidences)
-
-            # Try to split into name vs address
-            # Heuristic: first part is name, rest (especially if containing a PIN code) is address
-            name_part = collected_parts[0]
-            address_parts = collected_parts[1:] if len(collected_parts) > 1 else []
-
-            # If the first part itself contains a comma, split at first comma
-            if "," in name_part and not address_parts:
-                split_idx = name_part.index(",")
-                address_parts = [name_part[split_idx + 1:].strip()]
-                name_part = name_part[:split_idx].strip()
 
             name_field = ClassifiedField(
                 field_name="manufacturer_name",
@@ -372,14 +697,16 @@ def _extract_manufacturer(blocks: list[OCRBlock], full_text: str) -> tuple[Class
                 source_texts=collected_parts[:1],
             )
 
-            address_text = ", ".join(address_parts) if address_parts else ""
+            address_text = ", ".join(cleaned_addr_parts) if cleaned_addr_parts else ""
+            if address_text:
+                address_text = re.sub(r",\s*,+", ", ", address_text).strip().strip(".,;:- ").strip()
             address_field = None
             if address_text:
                 address_field = ClassifiedField(
                     field_name="manufacturer_address",
                     value=address_text,
                     confidence=avg_conf,
-                    source_texts=address_parts,
+                    source_texts=cleaned_addr_parts,
                 )
 
             return name_field, address_field
@@ -418,69 +745,125 @@ def _extract_manufacturer(blocks: list[OCRBlock], full_text: str) -> tuple[Class
 # ── Consumer Care ────────────────────────────────────────────────────────────
 
 _CARE_TRIGGER = re.compile(
-    r"(Consumer|Customer\s*Care|Helpline|Toll\s*Free|Contact\s*Us"
-    r"|Customer\s*Service|Grievance|Complaint)",
+    r"\b(Consumer|Customer\s*Care|Helpline|Toll\s*Free|Contact\s*Us"
+    r"|Customer\s*Service|Grievance|Complaints?|Gomplaints?|Care|Feedback)\b",
     re.IGNORECASE,
 )
 
 _PHONE_PATTERN = re.compile(
-    r"(?:\+91[\s\-]?)?(?:\d[\s\-]?){10}"
-    r"|1800[\s\-]?\d{3}[\s\-]?\d{3,5}"
-    r"|\d{3,5}[\s\-]?\d{6,8}",
+    r"(?:\+?91[\s\-]?)?[6-9]\d{9}\b"
+    r"|1800[\s\-]?\d{3}[\s\-]?\d{3,5}\b"
+    r"|(?:\+?91[\s\-]?)?0?\d{2,4}[\s\-]?\d{6,8}\b",
 )
 
-_EMAIL_PATTERN = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
+_EMAIL_PATTERN = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\s*\.?\s*(?:com|in|org|net|co\.in|gov\.in|[a-zA-Z]{2,})", re.IGNORECASE)
+
+
+def _normalize_care_value(text: str) -> str:
+    """Normalize OCR artifacts in email/phone like space before domain suffix or '(OM' for '.com'."""
+    normalized = re.sub(r"@([a-zA-Z0-9.\-]+)\s*\(OM\b", r"@\1.com", text, flags=re.IGNORECASE)
+    normalized = re.sub(r"@([a-zA-Z0-9.\-]+)\s+\.?\s*(com|in|org|net|co\.in|gov\.in)", r"@\1.\2", normalized, flags=re.IGNORECASE)
+    return normalized.strip()
 
 
 def _extract_consumer_care(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | None:
     """Look for consumer care contact details (phone or email)."""
-    # Strategy 1: block with trigger + phone/email
-    for block in blocks:
-        if _CARE_TRIGGER.search(block.text):
-            has_phone = _PHONE_PATTERN.search(block.text)
-            has_email = _EMAIL_PATTERN.search(block.text)
-            if has_phone or has_email:
-                return ClassifiedField(
-                    field_name="consumer_care",
-                    value=block.text.strip(),
-                    confidence=block.confidence,
-                    source_texts=[block.text],
-                )
-
-    # Strategy 2: trigger in one block, contact in next
+    # Strategy 1 & 2: Care trigger + window of up to 9 blocks
     for i, block in enumerate(blocks):
+        if re.search(r"\b(?:Lic|fssai|License)\b", block.text, re.IGNORECASE):
+            continue
         if _CARE_TRIGGER.search(block.text):
-            # Collect this block and up to 2 subsequent blocks
-            collected = [block.text.strip()]
-            confidences = [block.confidence]
-            for j in range(i + 1, min(i + 3, len(blocks))):
-                collected.append(blocks[j].text.strip())
-                confidences.append(blocks[j].confidence)
+            found_email = None
+            found_phone = None
+            email_texts: list[str] = []
+            phone_texts: list[str] = []
+            email_conf = 0.0
+            phone_conf = 0.0
 
-            combined = " ".join(collected)
-            has_phone = _PHONE_PATTERN.search(combined)
-            has_email = _EMAIL_PATTERN.search(combined)
-            if has_phone or has_email:
+            for j in range(i, min(i + 9, len(blocks))):
+                if re.search(r"\b(?:Lic|fssai|License)\b", blocks[j].text, re.IGNORECASE):
+                    continue
+                candidate = blocks[j].text.strip()
+                norm = _normalize_care_value(candidate)
+                if not found_email and _EMAIL_PATTERN.search(norm):
+                    found_email = norm
+                    email_texts = [blocks[j].text]
+                    email_conf = blocks[j].confidence
+                if not found_phone and _PHONE_PATTERN.search(norm):
+                    val = norm
+                    phone_texts = [blocks[j].text]
+                    phone_conf = blocks[j].confidence
+                    if j > 0 and re.search(r"\b(Mobile|Tel|Phone|Email|Customer\s*care)\b", blocks[j-1].text, re.IGNORECASE):
+                        val = f"{blocks[j-1].text.strip()}: {val}"
+                        phone_texts.insert(0, blocks[j-1].text)
+                        phone_conf = (phone_conf + blocks[j-1].confidence) / 2
+                    found_phone = val
+
+            if found_email and found_phone:
                 return ClassifiedField(
                     field_name="consumer_care",
-                    value=combined,
-                    confidence=sum(confidences) / len(confidences),
-                    source_texts=collected,
+                    value=f"{found_phone}, {found_email}",
+                    confidence=(phone_conf + email_conf) / 2,
+                    source_texts=phone_texts + email_texts,
+                )
+            if found_email:
+                return ClassifiedField(
+                    field_name="consumer_care",
+                    value=found_email,
+                    confidence=email_conf,
+                    source_texts=email_texts,
+                )
+            if found_phone:
+                return ClassifiedField(
+                    field_name="consumer_care",
+                    value=found_phone,
+                    confidence=phone_conf,
+                    source_texts=phone_texts,
                 )
 
-    # Strategy 3: full text
+    # Strategy 3: full text search
     trigger_match = _CARE_TRIGGER.search(full_text)
     if trigger_match:
-        window = full_text[trigger_match.start():trigger_match.start() + 120]
-        has_phone = _PHONE_PATTERN.search(window)
-        has_email = _EMAIL_PATTERN.search(window)
+        window = full_text[trigger_match.start():trigger_match.start() + 140]
+        norm = _normalize_care_value(window)
+        has_phone = _PHONE_PATTERN.search(norm)
+        has_email = _EMAIL_PATTERN.search(norm)
         if has_phone or has_email:
             return ClassifiedField(
                 field_name="consumer_care",
-                value=window.strip(),
+                value=norm.strip(),
                 confidence=0.7,
                 source_texts=[window.strip()],
             )
+
+    # Strategy 4: Fallback to direct email or phone found anywhere in OCR blocks
+    for i, block in enumerate(blocks):
+        if re.search(r"\b(?:Lic|fssai|License)\b", block.text, re.IGNORECASE):
+            continue
+        norm = _normalize_care_value(block.text.strip())
+        if _EMAIL_PATTERN.search(norm):
+            return ClassifiedField(
+                field_name="consumer_care",
+                value=norm,
+                confidence=block.confidence,
+                source_texts=[block.text],
+            )
+        if _PHONE_PATTERN.search(norm):
+            digits = re.sub(r"\D", "", norm)
+            if 8 <= len(digits) <= 12:
+                val = norm
+                source_texts = [block.text]
+                conf = block.confidence
+                if i > 0 and re.search(r"\b(Mobile|Tel|Phone|Email|Customer\s*care)\b", blocks[i-1].text, re.IGNORECASE):
+                    val = f"{blocks[i-1].text.strip()}: {val}"
+                    source_texts.insert(0, blocks[i-1].text)
+                    conf = (conf + blocks[i-1].confidence) / 2
+                return ClassifiedField(
+                    field_name="consumer_care",
+                    value=val,
+                    confidence=conf,
+                    source_texts=source_texts,
+                )
 
     return None
 

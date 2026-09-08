@@ -1,0 +1,187 @@
+[
+  {
+    "filename": "20260907_233634.jpg",
+    "blocks": 11,
+    "mrp": null,
+    "net_qty": null,
+    "mfg_date": "NFD : 09/06/25",
+    "manufacturer": null,
+    "address": null,
+    "consumer_care": null,
+    "passed_rules_count": 1,
+    "failed_rules_count": 4,
+    "failed_rules": [
+      "6_1_e",
+      "6_1_a",
+      "6_1_b",
+      "6_1_g"
+    ]
+  },
+  {
+    "filename": "20260907_233950.jpg",
+    "blocks": 77,
+    "mrp": "MRP Rs Exp ; 01/2024 (incl, 12/2026 of all ₹ 120 taxes); ($ 1 20/m[> Mfd by: DABU",
+    "net_qty": null,
+    "mfg_date": "Exp : 01/2024",
+    "manufacturer": "DABUR INDIA LTD",
+    "address": "Dislt Solan (H P) 173205, 109 HPSVDC, Industrial, Area;, Baddi;",
+    "consumer_care": "Toll Free Number; 1000 103 1644",
+    "passed_rules_count": 4,
+    "failed_rules_count": 1,
+    "failed_rules": [
+      "6_1_a"
+    ]
+  },
+  {
+    "filename": "20260907_234013.jpg",
+    "blocks": 121,
+    "mrp": null,
+    "net_qty": null,
+    "mfg_date": null,
+    "manufacturer": null,
+    "address": null,
+    "consumer_care": null,
+    "passed_rules_count": 0,
+    "failed_rules_count": 5,
+    "failed_rules": [
+      "6_1_e",
+      "6_1_a",
+      "6_1_b",
+      "6_1_f",
+      "6_1_g"
+    ]
+  },
+  {
+    "filename": "20260907_234028.jpg",
+    "blocks": 110,
+    "mrp": null,
+    "net_qty": "Net CONTENT 50 ml",
+    "mfg_date": null,
+    "manufacturer": null,
+    "address": null,
+    "consumer_care": null,
+    "passed_rules_count": 1,
+    "failed_rules_count": 4,
+    "failed_rules": [
+      "6_1_e",
+      "6_1_b",
+      "6_1_f",
+      "6_1_g"
+    ]
+  },
+  {
+    "filename": "20260907_234124.jpg",
+    "blocks": 81,
+    "mrp": null,
+    "net_qty": null,
+    "mfg_date": "Mfg Dale: 12/2025",
+    "manufacturer": null,
+    "address": null,
+    "consumer_care": null,
+    "passed_rules_count": 1,
+    "failed_rules_count": 4,
+    "failed_rules": [
+      "6_1_e",
+      "6_1_a",
+      "6_1_b",
+      "6_1_g"
+    ]
+  },
+  {
+    "filename": "20260907_234156.jpg",
+    "blocks": 65,
+    "mrp": "MRP Rs. (inct.ofali taxes) Batch No,Wid 1",
+    "net_qty": null,
+    "mfg_date": null,
+    "manufacturer": "rinse immediately with plenty of water If",
+    "address": "Reckitt Benckiser (India) Pvt. Ltd. Read, persistent irritation occurs,get medical, First Two Letters of Batch No. for",
+    "consumer_care": "Toll Free Number: 18001035012",
+    "passed_rules_count": 3,
+    "failed_rules_count": 2,
+    "failed_rules": [
+      "6_1_a",
+      "6_1_f"
+    ]
+  },
+  {
+    "filename": "20260907_234223.jpg",
+    "blocks": 121,
+    "mrp": "MRP: ₹ 1749.00 (Incl, of all Taxes)",
+    "net_qty": "Net Qty: 200 ml",
+    "mfg_date": "MFG Dt: 05-03-2025",
+    "manufacturer": "NAOS Les LABORATOIRES,",
+    "address": "Rue Pierre Berthier, @vartier, Saint Hilaire",
+    "consumer_care": "For Complaints & Feedback write to Imported & Marketed by address or call on 1800 102 1747 or mail",
+    "passed_rules_count": 5,
+    "failed_rules_count": 0,
+    "failed_rules": []
+  },
+  {
+    "filename": "20260907_234255.jpg",
+    "blocks": 43,
+    "mrp": null,
+    "net_qty": null,
+    "mfg_date": null,
+    "manufacturer": null,
+    "address": null,
+    "consumer_care": null,
+    "passed_rules_count": 0,
+    "failed_rules_count": 5,
+    "failed_rules": [
+      "6_1_e",
+      "6_1_a",
+      "6_1_b",
+      "6_1_f",
+      "6_1_g"
+    ]
+  },
+  {
+    "filename": "73808610-1fa5-47e2-b2bd-9c7999da6fb4.jpg",
+    "blocks": 72,
+    "mrp": "MRP (incl. of all taxes) 453",
+    "net_qty": "Net Quantity: 118 ml",
+    "mfg_date": "Mfg Date: 10/25",
+    "manufacturer": "; Encube Ethicals Pvt Ltd Plot Mo, H3,Smart hndustrial Fark",
+    "address": "Pithampur;, District, Dhar !, (MP) 454774",
+    "consumer_care": null,
+    "passed_rules_count": 4,
+    "failed_rules_count": 1,
+    "failed_rules": [
+      "6_1_g"
+    ]
+  },
+  {
+    "filename": "barcode-labels-labels-in-roll-form-pre-printed-labels.jpg",
+    "blocks": 82,
+    "mrp": "MRP IN MUMBAI Rs. 70 / -",
+    "net_qty": "Net Wt 200 g",
+    "mfg_date": "05-09-16",
+    "manufacturer": null,
+    "address": null,
+    "consumer_care": null,
+    "passed_rules_count": 3,
+    "failed_rules_count": 2,
+    "failed_rules": [
+      "6_1_b",
+      "6_1_g"
+    ]
+  },
+  {
+    "filename": "fa7c5d73-e46d-4122-aeb2-8e3ad9706fa2.jpg",
+    "blocks": 59,
+    "mrp": "MRP (<) 0 (Iriclusive of all taxes)",
+    "net_qty": null,
+    "mfg_date": null,
+    "manufacturer": null,
+    "address": null,
+    "consumer_care": null,
+    "passed_rules_count": 1,
+    "failed_rules_count": 4,
+    "failed_rules": [
+      "6_1_a",
+      "6_1_b",
+      "6_1_f",
+      "6_1_g"
+    ]
+  }
+]

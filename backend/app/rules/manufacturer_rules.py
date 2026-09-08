@@ -15,6 +15,7 @@ _DESCRIPTION = (
     description=_DESCRIPTION,
     citation=_CITATION,
     category="manufacturer",
+    severity="critical",
 )
 def check_manufacturer_declared(fields: dict) -> RuleResult:
     """Validates that manufacturer name and address are both present and non-trivially filled.

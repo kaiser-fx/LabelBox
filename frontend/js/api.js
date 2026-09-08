@@ -82,6 +82,14 @@ const API = (() => {
     return request('GET', `/sessions/${sessionId}/report`);
   }
 
+  async function downloadSessionReportPdf(sessionId) {
+    const response = await fetch(`${BASE}/sessions/${sessionId}/report/pdf`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error('Could not export the session PDF.');
+    return response.blob();
+  }
+
   // ── Scans ─────────────────────────────────────────────────────────────
   async function submitScan(sessionId, imageBlob, capturedAt = null) {
     const formData = new FormData();
@@ -103,7 +111,7 @@ const API = (() => {
 
   return {
     getToken, setToken, clearToken, isLoggedIn, login, getMe, logout,
-    createSession, listSessions, getSession, getSessionReport,
+    createSession, listSessions, getSession, getSessionReport, downloadSessionReportPdf,
     submitScan, getScan, listSessionScans,
   };
 })();

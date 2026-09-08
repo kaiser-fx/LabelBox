@@ -1,4 +1,4 @@
-const CACHE_NAME = 'labelbox-v1';
+const CACHE_NAME = 'labelbox-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

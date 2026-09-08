@@ -1,6 +1,23 @@
 import cv2
 import numpy as np
 
+MAX_OCR_DIMENSION = 1600
+
+
+def _downscale_for_ocr(image: np.ndarray) -> np.ndarray:
+    """Bound OCR memory use while retaining label text at a readable resolution."""
+    height, width = image.shape[:2]
+    largest_dimension = max(height, width)
+    if largest_dimension <= MAX_OCR_DIMENSION:
+        return image
+
+    scale = MAX_OCR_DIMENSION / largest_dimension
+    return cv2.resize(
+        image,
+        (round(width * scale), round(height * scale)),
+        interpolation=cv2.INTER_AREA,
+    )
+
 
 def preprocess_image(image_bytes: bytes) -> np.ndarray:
     """Preprocess image bytes for OCR:
@@ -18,8 +35,12 @@ def preprocess_image(image_bytes: bytes) -> np.ndarray:
     if image is None:
         raise ValueError("Could not decode image bytes. Unsupported or corrupted format.")
 
+    # EasyOCR's detector expands intermediate tensors sharply on full 12 MP photos.
+    # A 1600 px long edge retains label text while keeping CPU OCR within field-device memory.
+    resized = _downscale_for_ocr(image)
+
     # Convert to grayscale
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
 
     # Adaptive histogram equalization for contrast normalization
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))

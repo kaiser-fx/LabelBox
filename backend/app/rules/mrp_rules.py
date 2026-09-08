@@ -11,6 +11,7 @@ from app.rules.registry import RuleResult, register_rule
         "Every package shall bear the retail sale price of the package."
     ),
     category="mrp",
+    severity="major",
 )
 def check_mrp_declared(fields: dict) -> RuleResult:
     """Validates that the MRP field is present and contains a plausible price value.

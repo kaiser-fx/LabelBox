@@ -79,11 +79,69 @@ const App = (() => {
     });
   }
 
-  function onLoginSuccess() {
+  function setCurrentSession(session) {
+    currentSession = session;
+    const storeEl = $('#active-session-store');
+    const locEl = $('#active-session-location');
+    const idEl = $('#active-session-id');
+    const indEl = $('#active-session-indicator');
+
+    if (session) {
+      try {
+        localStorage.setItem('labelbox_session', JSON.stringify(session));
+      } catch { /* storage full/disabled */ }
+      if (storeEl) storeEl.textContent = session.store_name;
+      if (locEl) locEl.textContent = session.location || '—';
+      if (idEl) idEl.textContent = session.id ? session.id.slice(0, 8) + '…' : '—';
+      if (indEl) indEl.className = 'w-2 h-2 bg-success rounded-full animate-pulse';
+    } else {
+      localStorage.removeItem('labelbox_session');
+      if (storeEl) storeEl.textContent = 'No active session (tap to start)';
+      if (locEl) locEl.textContent = '—';
+      if (idEl) idEl.textContent = '—';
+      if (indEl) indEl.className = 'w-2 h-2 bg-amber-500 rounded-full';
+    }
+  }
+
+  async function restoreSession() {
+    try {
+      const saved = localStorage.getItem('labelbox_session');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.id) {
+          try {
+            const fresh = await API.getSession(parsed.id);
+            setCurrentSession(fresh);
+            return fresh;
+          } catch {
+            localStorage.removeItem('labelbox_session');
+          }
+        }
+      }
+      // Check existing sessions for this officer
+      const sessions = await API.listSessions();
+      if (sessions && sessions.length > 0) {
+        setCurrentSession(sessions[0]);
+        return sessions[0];
+      }
+    } catch (err) {
+      console.warn('Session auto-restore error:', err);
+    }
+    setCurrentSession(null);
+    return null;
+  }
+
+  async function onLoginSuccess() {
     $('#officer-name').textContent = currentOfficer.name;
     $('#officer-email').textContent = currentOfficer.email;
-    showView('view-session');
-    showToast(`Welcome, ${currentOfficer.name.split(' ').pop()}!`, 'success');
+    const restored = await restoreSession();
+    if (restored) {
+      showView('view-capture');
+      showToast(`Welcome back, ${currentOfficer.name.split(' ').pop()}! (Active: ${restored.store_name})`, 'success');
+    } else {
+      showView('view-session');
+      showToast(`Welcome, ${currentOfficer.name.split(' ').pop()}! Please start an inspection session.`, 'success');
+    }
   }
 
   // ── Session ───────────────────────────────────────────────────────────
@@ -100,7 +158,8 @@ const App = (() => {
       btn.textContent = 'Creating…';
 
       try {
-        currentSession = await API.createSession(storeName, location);
+        const newSession = await API.createSession(storeName, location);
+        setCurrentSession(newSession);
         onSessionCreated();
       } catch (err) {
         showToast(err.message, 'error');
@@ -112,9 +171,6 @@ const App = (() => {
   }
 
   function onSessionCreated() {
-    $('#active-session-store').textContent = currentSession.store_name;
-    $('#active-session-location').textContent = currentSession.location || '—';
-    $('#active-session-id').textContent = currentSession.id.slice(0, 8) + '…';
     showView('view-capture');
     showToast('Inspection session started', 'success');
   }
@@ -127,6 +183,13 @@ const App = (() => {
     const previewImg = $('#preview-img');
     const scanBtn = $('#scan-submit-btn');
     const retakeBtn = $('#retake-btn');
+    const sessionBar = $('#active-session-bar');
+
+    if (sessionBar) {
+      sessionBar.addEventListener('click', () => {
+        showView('view-session');
+      });
+    }
 
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
@@ -143,16 +206,13 @@ const App = (() => {
         const file = e.dataTransfer.files[0];
         if (file) handleImageSelected(file);
       });
-      dropZone.addEventListener('click', () => fileInput.click());
+      dropZone.addEventListener('click', (e) => {
+        if (e.target !== fileInput) fileInput.click();
+      });
     }
 
     retakeBtn.addEventListener('click', () => {
-      capturedImageBlob = null;
-      previewContainer.classList.add('hidden');
-      dropZone.classList.remove('hidden');
-      scanBtn.classList.add('hidden');
-      retakeBtn.classList.add('hidden');
-      fileInput.value = '';
+      resetCapture();
     });
 
     scanBtn.addEventListener('click', () => submitCapturedScan());
@@ -172,7 +232,19 @@ const App = (() => {
   }
 
   async function submitCapturedScan() {
-    if (!capturedImageBlob || !currentSession) return;
+    if (!capturedImageBlob) {
+      showToast('Please select or capture a label image first', 'warning');
+      return;
+    }
+
+    if (!currentSession) {
+      const restored = await restoreSession();
+      if (!restored) {
+        showToast('Please start an inspection session first', 'warning');
+        showView('view-session');
+        return;
+      }
+    }
 
     const scanBtn = $('#scan-submit-btn');
     scanBtn.disabled = true;
@@ -192,31 +264,51 @@ const App = (() => {
 
       const result = await API.submitScan(currentSession.id, capturedImageBlob);
       renderResult(result);
+      resetCapture();
       showView('view-result');
     } catch (err) {
-      // Try offline queue as fallback
-      try {
-        await OfflineQueue.enqueue(currentSession.id, capturedImageBlob);
-        showToast('Network error — scan queued offline', 'warning');
-      } catch {
-        showToast('Failed to submit scan: ' + err.message, 'error');
+      console.error('Scan submission failed:', err);
+      const isNetwork = !navigator.onLine ||
+        err.message?.toLowerCase().includes('failed to fetch') ||
+        err.message?.toLowerCase().includes('network');
+
+      if (isNetwork) {
+        try {
+          await OfflineQueue.enqueue(currentSession.id, capturedImageBlob);
+          showToast('Network issue — scan queued offline for sync', 'warning');
+          resetCapture();
+        } catch {
+          showToast('Scan could not be submitted: ' + err.message, 'error');
+        }
+      } else if (err.message?.includes('Session expired') || err.message?.includes('401')) {
+        showToast('Session expired. Please sign in again.', 'error');
+        showView('view-login');
+        return;
+      } else if (err.message?.includes('not found') || err.message?.includes('404')) {
+        showToast('Inspection session was not found. Please start a new session.', 'error');
+        setCurrentSession(null);
+        showView('view-session');
+        return;
+      } else {
+        showToast('Analysis error: ' + err.message, 'error');
       }
       showView('view-capture');
     } finally {
       scanBtn.disabled = false;
       scanBtn.innerHTML = '🔍 Analyze Label';
-      resetCapture();
     }
   }
 
   function resetCapture() {
     capturedImageBlob = null;
-    $('#capture-input').value = '';
-    $('#preview-container').classList.add('hidden');
-    $('#drop-zone').classList.remove('hidden');
-    $('#scan-submit-btn').classList.add('hidden');
-    $('#retake-btn').classList.add('hidden');
+    const fileInput = $('#capture-input');
+    if (fileInput) fileInput.value = '';
+    $('#preview-container')?.classList.add('hidden');
+    $('#drop-zone')?.classList.remove('hidden');
+    $('#scan-submit-btn')?.classList.add('hidden');
+    $('#retake-btn')?.classList.add('hidden');
   }
+
 
   // ── Result rendering ──────────────────────────────────────────────────
   function renderResult(scan) {
@@ -312,7 +404,14 @@ const App = (() => {
 
   // ── Session summary ───────────────────────────────────────────────────
   async function loadSessionSummary() {
-    if (!currentSession) return;
+    if (!currentSession) {
+      await restoreSession();
+    }
+    if (!currentSession) {
+      showToast('Please start an inspection session first', 'info');
+      showView('view-session');
+      return;
+    }
     try {
       const report = await API.getSessionReport(currentSession.id);
       const scans = report.scans;
@@ -326,6 +425,8 @@ const App = (() => {
       $('#summary-compliant').textContent = compliant;
       $('#summary-violations').textContent = nonCompliant;
       $('#summary-rate').textContent = total > 0 ? Math.round((compliant / total) * 100) + '%' : '—';
+
+      $('#summary-export-pdf').classList.remove('hidden');
 
       // Scan list
       const listEl = $('#summary-scan-list');
@@ -366,11 +467,12 @@ const App = (() => {
     $('#logout-btn')?.addEventListener('click', () => {
       API.logout();
       currentOfficer = null;
-      currentSession = null;
+      setCurrentSession(null);
       showView('view-login');
       showToast('Logged out', 'info');
     });
   }
+
 
   // ── Bottom nav ────────────────────────────────────────────────────────
   function initBottomNav() {
@@ -406,6 +508,20 @@ const App = (() => {
     $('#summary-scan-next')?.addEventListener('click', () => {
       resetCapture();
       showView('view-capture');
+    });
+    $('#summary-export-pdf')?.addEventListener('click', async () => {
+      if (!currentSession) return;
+      try {
+        const pdf = await API.downloadSessionReportPdf(currentSession.id);
+        const url = URL.createObjectURL(pdf);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `labelbox-session-${currentSession.id.slice(0, 8)}.pdf`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
     });
 
     // Check auth state on load

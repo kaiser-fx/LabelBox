@@ -2,14 +2,17 @@ import re
 
 from app.rules.registry import RuleResult, register_rule
 
-# Units recognised under the Legal Metrology Act for packaged commodities
+# Units recognised under the Legal Metrology Act for packaged commodities (including common OCR readings of ml)
 VALID_UNITS = re.compile(
     r"\b(\d+(?:[.,]\d+)?)\s*(g|gm|gms|gram|grams|kg|kilogram|kilograms|"
-    r"ml|millilitre|millilitres|milliliter|milliliters|"
+    r"ml|mi|m1|mil|me|mks|mls|millilitre|millilitres|milliliter|milliliters|"
     r"l|litre|litres|liter|liters|"
-    r"cm|m|mm|pieces|pcs|nos|units)\b",
+    r"cm|mm|pieces|pcs|nos|units|pack|packs|n)\b"
+    r"|\bpack\s+of\s*\d+\b",
     re.IGNORECASE,
 )
+
+
 
 
 @register_rule(
@@ -21,6 +24,7 @@ VALID_UNITS = re.compile(
         "contained in the package, expressed in terms of standard units of weight or measure."
     ),
     category="net_quantity",
+    severity="major",
 )
 def check_net_quantity_declared(fields: dict) -> RuleResult:
     """Validates that net quantity is present with a numeric value and a recognized unit."""

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_officer
@@ -9,6 +9,7 @@ from app.db.models.inspection_session import InspectionSession
 from app.db.models.officer import Officer
 from app.db.models.scan import Scan
 from app.schemas.session import SessionCreate, SessionReport, SessionResponse
+from app.services.report_generator import build_session_pdf
 from app.services.session_report import build_session_report
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -102,3 +103,35 @@ def get_session_report(
             detail=f"Inspection session '{session_id}' not found.",
         )
     return build_session_report(session)
+
+
+@router.get("/{session_id}/report/pdf", response_class=Response)
+def download_session_report_pdf(
+    session_id: str,
+    current_officer: Annotated[Officer, Depends(get_current_officer)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    """Generate a cited, downloadable session report without persisting a file."""
+    session = (
+        db.query(InspectionSession)
+        .options(
+            selectinload(InspectionSession.scans).selectinload(Scan.violations),
+        )
+        .filter(
+            InspectionSession.id == session_id,
+            InspectionSession.officer_id == current_officer.id,
+        )
+        .first()
+    )
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Inspection session '{session_id}' not found.",
+        )
+    report = build_session_report(session)
+    filename = f"labelbox-session-{session.id[:8]}.pdf"
+    return Response(
+        content=build_session_pdf(session, report),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

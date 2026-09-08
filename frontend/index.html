@@ -172,10 +172,10 @@
     ────────────────────────────────────────────────────────────────── -->
     <section id="view-capture" class="view">
       <!-- Active session bar -->
-      <div class="bg-surface rounded-xl border border-line p-3 mb-5 flex items-center justify-between">
+      <div id="active-session-bar" class="bg-surface rounded-xl border border-line p-3 mb-5 flex items-center justify-between cursor-pointer hover:border-orange transition" title="Tap to change session">
         <div class="flex items-center gap-2">
-          <span class="w-2 h-2 bg-success rounded-full animate-pulse"></span>
-          <span class="text-sm font-semibold text-ink" id="active-session-store">—</span>
+          <span id="active-session-indicator" class="w-2 h-2 bg-amber-500 rounded-full"></span>
+          <span class="text-sm font-semibold text-ink" id="active-session-store">No active session (tap to start)</span>
         </div>
         <span class="text-xs text-ink-muted font-mono" id="active-session-id">—</span>
       </div>
@@ -184,13 +184,15 @@
       <h2 class="font-display text-2xl font-black text-ink mb-2">Scan Product Label</h2>
       <p class="text-sm text-ink-muted mb-5">Take a photo or upload an image of the product's label showing MRP, weight, manufacturer, and other declarations.</p>
 
+      <input id="capture-input" type="file" accept="image/*" capture="environment" class="hidden">
+
       <!-- Drop zone / Upload -->
       <div id="drop-zone" class="drop-zone border-2 border-dashed border-line rounded-2xl p-8 text-center cursor-pointer hover:border-orange hover:bg-orange-soft/30 transition-all">
         <div class="text-4xl mb-3">📸</div>
         <p class="text-sm font-semibold text-ink mb-1">Tap to capture or upload</p>
         <p class="text-xs text-ink-muted">or drag and drop an image here</p>
-        <input id="capture-input" type="file" accept="image/*" capture="environment" class="hidden">
       </div>
+
 
       <!-- Preview -->
       <div id="preview-container" class="hidden mt-4">
@@ -307,6 +309,10 @@
       <div id="summary-scan-list" class="space-y-2 mb-6">
         <div class="text-sm text-ink-muted text-center py-8">No scans yet in this session.</div>
       </div>
+
+      <button id="summary-export-pdf" class="hidden w-full text-center bg-surface text-ink font-semibold py-3.5 rounded-pill border border-line hover:bg-surface-muted transition mb-3">
+        ↓ Export PDF report
+      </button>
 
       <button id="summary-scan-next" class="w-full bg-orange text-white font-bold py-3.5 rounded-pill hover:opacity-90 transition">
         📸 Scan Next Product

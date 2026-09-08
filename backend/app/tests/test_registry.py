@@ -68,6 +68,11 @@ class TestGetRule:
         assert rule is not None
         assert rule.rule_id == "6_1_e"
         assert rule.category == "mrp"
+        assert rule.severity == "major"
+
+    def test_rule_triage_severities(self):
+        assert get_rule("6_1_b").severity == "critical"
+        assert get_rule("6_1_g").severity == "minor"
 
     def test_get_nonexistent_rule(self):
         rule = get_rule("nonexistent_rule")

@@ -22,6 +22,7 @@ class RuleDefinition:
     description: str
     citation: str
     category: str
+    severity: str
     validate: Callable[[dict], RuleResult]
 
 
@@ -33,6 +34,7 @@ def register_rule(
     description: str,
     citation: str,
     category: str,
+    severity: str,
 ) -> Callable:
     """Decorator that registers a validation function in the rule registry.
 
@@ -52,6 +54,7 @@ def register_rule(
             description=description,
             citation=citation,
             category=category,
+            severity=severity,
             validate=fn,
         )
         return fn

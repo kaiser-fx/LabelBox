@@ -12,9 +12,10 @@ _DESCRIPTION = "Consumer care contact details must be declared on the package"
 
 # Phone: Indian landline/mobile patterns, or toll-free 1800 numbers
 _PHONE_PATTERN = re.compile(
-    r"(?:\+91[\s\-]?)?(?:\d[\s\-]?){10}"  # 10-digit mobile
-    r"|1800[\s\-]?\d{3}[\s\-]?\d{4,5}"    # toll-free
-    r"|\d{3,5}[\s\-]?\d{6,8}",            # landline with STD
+    r"(?:\+?91[\s\-]?)?[6-9]\d{9}\b"      # 10-digit mobile (optional +91 or 91)
+    r"|(?:\+91[\s\-]?)?(?:\d[\s\-]?){10}"  # generic 10-digit
+    r"|1800[\s\-]?\d{3}[\s\-]?\d{3,5}\b"  # toll-free
+    r"|(?:\+?91[\s\-]?)?(?:0?[1-9]\d{1,4}[\s\-]?)?(?:\d[\s\-]?){7,8}\b",  # landline with STD
 )
 
 _EMAIL_PATTERN = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
@@ -25,6 +26,7 @@ _EMAIL_PATTERN = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
     description=_DESCRIPTION,
     citation=_CITATION,
     category="consumer_care",
+    severity="minor",
 )
 def check_consumer_care(fields: dict) -> RuleResult:
     """Validates that consumer care info is present and contains a phone number or email."""

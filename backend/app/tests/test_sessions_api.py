@@ -138,3 +138,18 @@ class TestSessionsAPI:
         assert data["scans_with_violations"] == 1
         assert data["total_violations"] == 2
         assert data["violations_by_rule"] == {"6_1_a": 1, "6_1_e": 1}
+
+    def test_session_pdf_export_returns_a_pdf(self, client, auth_headers):
+        session_response = client.post(
+            "/sessions",
+            json={"store_name": "Export Store", "location": "Delhi"},
+            headers=auth_headers,
+        )
+        response = client.get(
+            f"/sessions/{session_response.json()['id']}/report/pdf",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/pdf")
+        assert response.content.startswith(b"%PDF")
