@@ -501,6 +501,23 @@ class TestOCRArtifactRecovery:
         assert result["manufacturer_address"] is not None and "Baddi" in result["manufacturer_address"]
         assert result["consumer_care"] is not None and "daburcares@dabur.com" in result["consumer_care"]
 
+    def test_fuzzy_anchor_matching_for_ocr_typos(self):
+        """Verify fuzzy anchor matching catches degraded OCR keywords with character substitutions."""
+        blocks = [
+            _make_block("Het Quantity: 250 g"),
+            _make_block("Makimum Retail Price: ₹ 350"),
+            _make_block("Mfa Date: 05/2026"),
+            _make_block("Manufacturd by: ABC Healthcare Ltd, Plot 12, Industrial Area, Pune 411001"),
+            _make_block("Cansumer Care: 1800 200 3000"),
+        ]
+        result = classify_fields(blocks)
+        assert result["net_quantity"] is not None and "250 g" in result["net_quantity"]
+        assert result["mrp"] is not None and "350" in result["mrp"]
+        assert result["date_of_manufacture"] is not None and "05/2026" in result["date_of_manufacture"]
+        assert result["manufacturer_name"] is not None and "ABC Healthcare Ltd" in result["manufacturer_name"]
+        assert result["consumer_care"] is not None and "1800 200 3000" in result["consumer_care"]
+
+
 
 
 

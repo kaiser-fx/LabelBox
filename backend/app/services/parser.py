@@ -4,6 +4,7 @@ Takes a list of OCRBlock and returns a dict keyed by field name with extracted v
 matching the interface expected by the Phase 1 rule engine (run_all_rules).
 """
 
+import difflib
 import logging
 import re
 from dataclasses import dataclass
@@ -20,6 +21,71 @@ class ClassifiedField:
     value: str
     confidence: float
     source_texts: list[str]
+
+
+# ── Fuzzy Matching Anchors ───────────────────────────────────────────────────
+
+_MRP_FUZZY_ANCHORS = [
+    "mrp", "m.r.p", "maximum retail price", "max retail price",
+    "retail price", "max price",
+]
+
+_NET_QTY_FUZZY_ANCHORS = [
+    "net quantity", "net qty", "net weight", "net wt", "net content",
+    "net contents", "net volume", "net vol", "quantity", "weight",
+]
+
+_DATE_FUZZY_ANCHORS = [
+    "date of mfg", "date of manufacture", "mfg date", "mfd date",
+    "mfd", "mfg", "pkd date", "packed on", "date of packing",
+    "date of pkd", "best before", "expiry date", "exp date", "use by",
+    "use before",
+]
+
+_MFR_FUZZY_ANCHORS = [
+    "manufactured by", "mfd by", "mfg by", "packed by", "pkd by",
+    "marketed by", "mkt by", "manufactured & packed by", "factory address",
+    "unit address", "manufactured in india by",
+]
+
+_CARE_FUZZY_ANCHORS = [
+    "consumer care", "customer care", "consumer cell", "customer service",
+    "contact us", "toll free", "helpline", "grievance", "feedback",
+    "consumer complaints", "customer support",
+]
+
+
+def fuzzy_match_anchor(text: str, anchors: list[str], threshold: float = 0.75) -> bool:
+    """Return True if text contains an n-gram matching any of the given anchor keywords."""
+    if not text:
+        return False
+    words = re.findall(r"[a-zA-Z0-9]+", text.lower())
+    if not words:
+        return False
+
+    for anchor in anchors:
+        anchor_tokens = anchor.lower().split()
+        n = len(anchor_tokens)
+        if n == 1:
+            target = anchor_tokens[0]
+            for w in words:
+                if len(w) >= len(target) - 1:
+                    if difflib.SequenceMatcher(None, w, target).ratio() >= max(threshold, 0.80):
+                        return True
+        else:
+            if len(words) < n:
+                # Suffix fallback ONLY for true quantity terms, never for prefixes like 'mfd' without 'by'
+                if len(words) == 1 and words[0] in ("quantity", "qty", "weight", "volume"):
+                    if any("quantity" in a or "weight" in a or "volume" in a or "qty" in a for a in anchor_tokens):
+                        return True
+                continue
+            for i in range(len(words) - n + 1):
+                window = " ".join(words[i : i + n])
+                if difflib.SequenceMatcher(None, window, anchor.lower()).ratio() >= threshold:
+                    return True
+    return False
+
+
 
 
 # ── MRP ──────────────────────────────────────────────────────────────────────
@@ -140,7 +206,7 @@ def _extract_mrp(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | No
 
     # Strategy 1: Find block(s) with MRP keyword that ALREADY contain the complete price
     for block in blocks:
-        if _MRP_TRIGGER.search(block.text):
+        if _MRP_TRIGGER.search(block.text) or fuzzy_match_anchor(block.text, _MRP_FUZZY_ANCHORS):
             if _has_inline_price(block.text):
                 return ClassifiedField(
                     field_name="mrp",
@@ -151,13 +217,16 @@ def _extract_mrp(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | No
 
     # Strategy 2: MRP keyword in one block, price in adjacent blocks
     for i, block in enumerate(blocks):
-        if _MRP_TRIGGER.search(block.text):
-            # Check upcoming blocks (within 4 blocks)
-            for next_idx in range(i + 1, min(i + 4, len(blocks))):
+        if _MRP_TRIGGER.search(block.text) or fuzzy_match_anchor(block.text, _MRP_FUZZY_ANCHORS):
+            # Check upcoming blocks (within 7 blocks)
+            for next_idx in range(i + 1, min(i + 7, len(blocks))):
                 next_block = blocks[next_idx]
                 candidate = next_block.text.strip()
                 if _DATE_LIKE_VALUE.match(candidate):
                     continue
+                if re.match(r"^\d{1,2}$", candidate) and next_idx + 1 < len(blocks) and re.match(r"^[/\-]\d{2,4}", blocks[next_idx + 1].text.strip()):
+                    continue
+
 
                 if (
                     _ADJACENT_PRICE.search(candidate)
@@ -189,7 +258,7 @@ def _extract_mrp(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | No
 
     # Strategy 2b: Spatial search on same horizontal line to the right of MRP
     for block in blocks:
-        if _MRP_TRIGGER.search(block.text) and block.bounding_box:
+        if (_MRP_TRIGGER.search(block.text) or fuzzy_match_anchor(block.text, _MRP_FUZZY_ANCHORS)) and block.bounding_box:
             by_min = min(pt[1] for pt in block.bounding_box)
             by_max = max(pt[1] for pt in block.bounding_box)
             bx_max = max(pt[0] for pt in block.bounding_box)
@@ -300,7 +369,9 @@ def _normalize_net_quantity(text: str) -> str:
         flags=re.IGNORECASE,
     )
     normalized = re.sub(r"\b(?:Net\s+)?t\s+Quantity\b", "Net Quantity", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\b(?:Net\s+)?[\{\[\(]\s*Quantity\b", "Net Quantity", normalized, flags=re.IGNORECASE)
     # If "PACK OF" is present without a trailing digit, OCR dropped single digit '1'
+
     if re.search(r"\bPACK\s+OF\s*$", normalized, re.IGNORECASE):
         normalized = re.sub(r"\b(PACK\s+OF)\s*$", r"\1 1", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r":+", ":", normalized)
@@ -315,7 +386,7 @@ def _extract_net_quantity(blocks: list[OCRBlock], full_text: str) -> ClassifiedF
     for block in blocks:
         if re.search(r"\b(INGREDIENTS|ETHYL\s+ALCOHOL|DENATURED)\b", block.text, re.IGNORECASE):
             continue
-        if _NET_QTY_TRIGGER.search(block.text):
+        if _NET_QTY_TRIGGER.search(block.text) or fuzzy_match_anchor(block.text, _NET_QTY_FUZZY_ANCHORS):
             qty_match = _QTY_VALUE.search(block.text)
             if qty_match:
                 return ClassifiedField(
@@ -329,7 +400,7 @@ def _extract_net_quantity(blocks: list[OCRBlock], full_text: str) -> ClassifiedF
     for i, block in enumerate(blocks):
         if re.search(r"\b(INGREDIENTS|ETHYL\s+ALCOHOL|DENATURED)\b", block.text, re.IGNORECASE):
             continue
-        if _NET_QTY_TRIGGER.search(block.text):
+        if _NET_QTY_TRIGGER.search(block.text) or fuzzy_match_anchor(block.text, _NET_QTY_FUZZY_ANCHORS):
             for next_idx in range(i + 1, min(i + 3, len(blocks))):
                 next_block = blocks[next_idx]
                 qty_match = _QTY_VALUE.search(next_block.text)
@@ -348,7 +419,7 @@ def _extract_net_quantity(blocks: list[OCRBlock], full_text: str) -> ClassifiedF
 
     # Strategy 2b: Spatial search on same horizontal line to the right of Net Qty
     for i, block in enumerate(blocks):
-        if _NET_QTY_TRIGGER.search(block.text) and block.bounding_box:
+        if (_NET_QTY_TRIGGER.search(block.text) or fuzzy_match_anchor(block.text, _NET_QTY_FUZZY_ANCHORS)) and block.bounding_box:
             by_min = min(pt[1] for pt in block.bounding_box)
             by_max = max(pt[1] for pt in block.bounding_box)
             bx_max = max(pt[0] for pt in block.bounding_box)
@@ -437,7 +508,7 @@ def _extract_date(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | N
         if re.search(r"\b(?:Lic|License)\b", block.text, re.IGNORECASE):
             continue
         norm_b = _normalize_date_value(block.text)
-        if _DATE_TRIGGER.search(norm_b):
+        if _DATE_TRIGGER.search(norm_b) or fuzzy_match_anchor(norm_b, _DATE_FUZZY_ANCHORS):
             for pattern in _DATE_PATTERNS:
                 if pattern.search(norm_b):
                     return ClassifiedField(
@@ -452,7 +523,7 @@ def _extract_date(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | N
         if re.search(r"\b(?:Lic|License)\b", block.text, re.IGNORECASE):
             continue
         norm_b = _normalize_date_value(block.text)
-        if _DATE_TRIGGER.search(norm_b):
+        if _DATE_TRIGGER.search(norm_b) or fuzzy_match_anchor(norm_b, _DATE_FUZZY_ANCHORS):
             # Check previous block (e.g. multi-column layout where date value precedes or is above trigger)
             if i > 0:
                 prev_block = blocks[i - 1]
@@ -509,7 +580,7 @@ def _extract_date(blocks: list[OCRBlock], full_text: str) -> ClassifiedField | N
     for block in blocks:
         if re.search(r"\b(?:Lic|License)\b", block.text, re.IGNORECASE):
             continue
-        if _DATE_TRIGGER.search(block.text) and block.bounding_box:
+        if (_DATE_TRIGGER.search(block.text) or fuzzy_match_anchor(block.text, _DATE_FUZZY_ANCHORS)) and block.bounding_box:
             by_min = min(pt[1] for pt in block.bounding_box)
             by_max = max(pt[1] for pt in block.bounding_box)
             bx_max = max(pt[0] for pt in block.bounding_box)
@@ -588,9 +659,16 @@ def _extract_manufacturer(blocks: list[OCRBlock], full_text: str) -> tuple[Class
     # Strategy 1: find trigger block, then collect subsequent blocks as address
     for i, block in enumerate(blocks):
         trigger_match = _MFR_TRIGGER.search(block.text)
-        if trigger_match:
+        is_fuzzy_mfr = False
+        if not trigger_match and fuzzy_match_anchor(block.text, _MFR_FUZZY_ANCHORS):
+            is_fuzzy_mfr = True
+        if trigger_match or is_fuzzy_mfr:
             # Text after the trigger keyword in this block is the start of the name
-            after_trigger = block.text[trigger_match.end():].strip()
+            if trigger_match:
+                after_trigger = block.text[trigger_match.end():].strip()
+            else:
+                tokens = block.text.split(None, 2)
+                after_trigger = tokens[2].strip() if len(tokens) > 2 else ""
             # Remove leading punctuation/colon
             after_trigger = re.sub(r"^[\s:,\-]+", "", after_trigger)
 
@@ -772,7 +850,7 @@ def _extract_consumer_care(blocks: list[OCRBlock], full_text: str) -> Classified
     for i, block in enumerate(blocks):
         if re.search(r"\b(?:Lic|fssai|License)\b", block.text, re.IGNORECASE):
             continue
-        if _CARE_TRIGGER.search(block.text):
+        if _CARE_TRIGGER.search(block.text) or fuzzy_match_anchor(block.text, _CARE_FUZZY_ANCHORS):
             found_email = None
             found_phone = None
             email_texts: list[str] = []

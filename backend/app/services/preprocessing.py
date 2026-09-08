@@ -39,14 +39,6 @@ def preprocess_image(image_bytes: bytes) -> np.ndarray:
     # A 1600 px long edge retains label text while keeping CPU OCR within field-device memory.
     resized = _downscale_for_ocr(image)
 
-    # Convert to grayscale
-    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    # Convert to grayscale 2D array without destructive blurring filters
+    return cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
 
-    # Adaptive histogram equalization for contrast normalization
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    contrast_normalized = clahe.apply(gray)
-
-    # Bilateral filter removes noise while keeping edges sharp (critical for text OCR)
-    denoised = cv2.bilateralFilter(contrast_normalized, d=7, sigmaColor=50, sigmaSpace=50)
-
-    return denoised

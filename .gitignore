@@ -36,6 +36,7 @@ alembic/versions/__pycache__/
 
 # Uploads
 backend/uploads/
+uploads
 
 # pytest
 .pytest_cache/
