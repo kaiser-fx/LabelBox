@@ -18,10 +18,10 @@ LabelBox is a mobile-first compliance scanner for packaged commodities. Legal Me
 
 ## UI 
 
-![Project Logo](uploads/UI/Picture1.png)
-![Project Logo](uploads/UI/Picture2.png)
-![Project Logo](uploads/UI/Picture3.png)
-![Project Logo](uploads/UI/Picture4.png)
+![Officer Login](docs/images/Picture1.png)
+![Start Session](docs/images/Picture2.png)
+![Label Capture](docs/images/Picture3.png)
+![Compliance Results](docs/images/Picture4.png)
 
 ## Stack
 
