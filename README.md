@@ -135,16 +135,6 @@ The current representative rule subset checks these mandatory declarations:
 
 Severity is a product triage label, not a statutory penalty classification.
 
-## Testing
-
-Run the backend test suite from the project root:
-
-```powershell
-.\sih2026venv\Scripts\python.exe -m pytest .\backend\app\tests -q
-```
-
-The latest verified suite contains 111 passing tests.
-
 ## OCR notes and limitations
 
 - Large phone photos are downscaled to a maximum 1600 px edge before OCR to keep memory use safe.
@@ -152,6 +142,3 @@ The latest verified suite contains 111 passing tests.
 - When a value cannot be read reliably, LabelBox should return it as not detected for officer review rather than infer a declaration.
 - The configured PyTorch environment must include a CUDA-enabled build before EasyOCR can use an NVIDIA GPU. The current code automatically enables GPU only when `torch.cuda.is_available()` is true.
 
-## Scope
-
-The current demo includes Phases 1-6 and the scoped Phase 7 enhancements: severity metadata and PDF export. Multilingual OCR, repeat-offender analysis, and visual OCR bounding-box overlays remain deferred.
